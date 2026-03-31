@@ -1,337 +1,323 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import HeaderScanner from "./components/modules/HeaderScanner";
+import PortScanner from "./components/modules/PortScanner";
+import DirectoryScanner from "./components/modules/DirectoryScanner";
 
-function App() {
+const API = "http://127.0.0.1:5000";
+
+export default function App() {
   const [url, setUrl] = useState("");
-  const [result, setResult] = useState(null);
-  const [bannerResult, setBannerResult] = useState(null);
-  const [portResult, setPortResult] = useState(null);
-  const [loading, setLoading] = useState(false);
+
+  // Individual module data states
+  const [headerData, setHeaderData] = useState(null);
+  const [tlsData, setTlsData] = useState(null);
+  const [portData, setPortData] = useState(null);
+  const [dirData, setDirData] = useState(null);
+
+  // Individual loading states
+  const [loadingHeader, setLoadingHeader] = useState(false);
+  const [loadingTls, setLoadingTls] = useState(false);
+  const [loadingPort, setLoadingPort] = useState(false);
+  const[loadingDirectory, setLoadingDirectory] = useState(false);
+
   const [error, setError] = useState(null);
+  const [scanned, setScanned] = useState(false);
 
-  const startScan = async () => {
+  // Individual scan functions
+  const scanHeader = async () => {
     if (!url.trim()) return;
-
-    setLoading(true);
-    setResult(null);
-    setBannerResult(null);
-    setPortResult(null);
+    setLoadingHeader(true);
     setError(null);
 
     try {
-      const [headerRes, bannerRes, portRes] = await Promise.all([
-        fetch("http://127.0.0.1:5000/scan/header", {
+      const response = await fetch(`${API}/scan/header`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await response.json();
+      setHeaderData(data);
+      setScanned(true);
+    } catch (err) {
+      setError("Cannot reach header scanner backend");
+    } finally {
+      setLoadingHeader(false);
+    }
+  };
+
+  const scanTls = async () => {
+    if (!url.trim()) return;
+    setLoadingTls(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API}/scan/tls`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await response.json();
+      setTlsData(data.error ? null : data);
+      setScanned(true);
+    } catch (err) {
+      setError("Cannot reach TLS scanner backend");
+    } finally {
+      setLoadingTls(false);
+    }
+  };
+
+  const scanPorts = async () => {
+    if (!url.trim()) return;
+    setLoadingPort(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API}/scan/ports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await response.json();
+      setPortData(data);
+      setScanned(true);
+    } catch (err) {
+      setError("Cannot reach port scanner backend");
+    } finally {
+      setLoadingPort(false);
+    }
+  };
+  const scanDirectories = async () => {
+    if (!url.trim()) return;
+    setLoadingDirectory(true);
+    setError(null);
+    
+
+    try {
+      const response = await fetch(`${API}/scan/directories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await response.json();
+      // Handle directory scanner data if needed
+      setDirData(data);
+      setScanned(true);
+
+    } catch (err) {
+      setError("Cannot reach directory scanner backend");
+    }
+    finally {
+      setLoadingDirectory(false);
+    }
+
+  };  
+
+
+  // Scan all modules
+  const scanAll = async () => {
+    if (!url.trim()) return;
+    setLoadingHeader(true);
+    setLoadingTls(true);
+    setLoadingPort(true);
+    setLoadingDirectory(true);
+    setError(null);
+    setHeaderData(null);
+    setTlsData(null);
+    setPortData(null);
+    setDirData(null);
+    setScanned(false);
+
+    try {
+      const [headerRes, tlsRes, portRes, dirRes] = await Promise.all([
+        fetch(`${API}/scan/header`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
         }),
-        fetch("http://127.0.0.1:5000/scan/banner", {
+        fetch(`${API}/scan/tls`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
         }),
-        fetch("http://127.0.0.1:5000/scan/ports", {
+        fetch(`${API}/scan/ports`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        }),
+        fetch(`${API}/scan/directories`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
         }),
       ]);
 
-      const headerData = await headerRes.json();
-      const bannerData = await bannerRes.json();
-      const portData   = await portRes.json();
+      const [headerJson, tlsJson, portJson,dirJson] = await Promise.all([
+        headerRes.json(),
+        tlsRes.json(),
+        portRes.json(),
+        dirRes.json(),
+      ]);
 
-      setResult(headerData);
-      setBannerResult(bannerData);
-      setPortResult(portData);
+      setHeaderData(headerJson);
+      setTlsData(tlsJson.error ? null : tlsJson);
+      setPortData(portJson);
+      setDirData(dirJson); 
+      setScanned(true);
     } catch (err) {
-      setError("Failed to connect to the scanner backend. Is Flask running?");
+      setError("Cannot reach the scanner backend. Is Flask running on port 5000?");
     } finally {
-      setLoading(false);
+      setLoadingHeader(false);
+      setLoadingTls(false);
+      setLoadingPort(false);
+      setLoadingDirectory(false);
     }
   };
 
-  /* ── Colour helpers ── */
-  const severityColor = (severity) => {
-    if (severity === "High")   return "text-red-600";
-    if (severity === "Medium") return "text-orange-500";
-    if (severity === "Low")    return "text-blue-500";
-    return "text-green-600";
-  };
+  // Clear all results
+  const clearResults = () => {
+    setHeaderData(null);
+    setTlsData(null);
+    setPortData(null);
+    setDirData(null);
+    setScanned(false);
 
-  const severityBadgeBg = (severity) => {
-    if (severity === "High")   return "bg-red-100 text-red-700 border border-red-200";
-    if (severity === "Medium") return "bg-orange-100 text-orange-700 border border-orange-200";
-    if (severity === "Low")    return "bg-blue-100 text-blue-700 border border-blue-200";
-    return "bg-green-100 text-green-700 border border-green-200";
+    setError(null);
   };
-
-  const statusBadge = (status) => {
-    if (status === "Secure")  return "bg-green-100 text-green-700";
-    if (status === "Missing") return "bg-red-100 text-red-700";
-    return "bg-orange-100 text-orange-700";
-  };
-
-  /* ── Banner info row ── */
-  const InfoRow = ({ label, value, mono = false }) => (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs font-semibold uppercase tracking-widest text-gray-400">
-        {label}
-      </span>
-      <span className={`text-sm text-gray-800 break-all ${mono ? "font-mono" : "font-medium"}`}>
-        {value || "—"}
-      </span>
-    </div>
-  );
 
   return (
-    <div className="min-h-screen bg-gray-50">
-
-      {/* ── Top Nav Bar ── */}
-      <header className="bg-gray-900 text-white px-8 py-4 flex items-center gap-3 shadow-md">
-        <div className="flex items-center gap-2">
-          <span className="text-blue-400 text-xl">⬡</span>
-          <span className="font-bold text-lg tracking-tight">E-WMEAP</span>
+    <div className="min-h-screen bg-[#0a0f1e] text-slate-100" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+      <header className="border-b border-slate-800 bg-[#080d1a]/80 backdrop-blur-sm sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center gap-4">
+          <div className="flex items-center gap-2.5">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <polygon points="12,2 22,7 22,17 12,22 2,17 2,7" stroke="#3b82f6" strokeWidth="1.5" fill="none" />
+              <polygon points="12,6 18,9.5 18,16.5 12,20 6,16.5 6,9.5" fill="#3b82f6" opacity="0.15" />
+              <circle cx="12" cy="12" r="2.5" fill="#3b82f6" />
+            </svg>
+            <span className="font-bold text-sm tracking-tight text-white">E-WMEAP</span>
+          </div>
+          <span className="text-slate-600 text-xs hidden sm:block">
+            / Enterprise Web Misconfiguration & Exposure Assessment Platform
+          </span>
         </div>
-        <span className="ml-2 text-gray-400 text-sm hidden sm:block">
-          Enterprise Web Misconfiguration &amp; Exposure Assessment Platform
-        </span>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-10">
-
-        {/* ── Page Title ── */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Security Scanner</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Analyse headers, banners, and exposure signals for a target URL.
+      <main className="max-w-6xl mx-auto px-6 py-10">
+        {/* Hero / Input */}
+        <div className="mb-12">
+          <h1 className="text-3xl font-black tracking-tight text-white mb-1">
+            Security Scanner
+          </h1>
+          <p className="text-sm text-slate-500 mb-8">
+            Analyse headers, TLS, services, and exposure signals for any target URL.
           </p>
-        </div>
 
-        {/* ── URL Input ── */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-8">
-          <label className="block text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">
-            Target URL
-          </label>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              placeholder="https://example.com"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && startScan()}
-              className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-            />
+          {/* URL bar */}
+          <div className="flex gap-3 items-stretch mb-4">
+            <div className="flex-1 flex items-center gap-3 bg-slate-800/60 border border-slate-700/60 rounded-xl px-4
+              focus-within:border-blue-500/60 focus-within:bg-slate-800 transition-all">
+              <span className="text-slate-600 text-xs font-mono select-none">TARGET ›</span>
+              <input
+                type="text"
+                placeholder="https://example.com"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && scanAll()}
+                className="flex-1 bg-transparent py-3.5 text-sm text-slate-100 placeholder:text-slate-600
+                  font-mono focus:outline-none"
+              />
+            </div>
             <button
-              onClick={startScan}
-              disabled={loading}
-              className="px-6 py-2.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 active:scale-95 transition font-semibold disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+              onClick={scanAll}
+              className="px-8 py-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95
+                text-white text-sm font-bold rounded-xl transition-all
+                shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_28px_rgba(59,130,246,0.5)]"
             >
-              {loading ? "Scanning…" : "Run Scan"}
+              Scan All
+            </button>
+            <button
+              onClick={clearResults}
+              className="px-4 py-3.5 bg-slate-700 hover:bg-slate-600 active:scale-95
+                text-white text-sm font-bold rounded-xl transition-all"
+            >
+              Clear
             </button>
           </div>
+
+          {/* Individual Module Buttons */}
+          <div className="flex gap-3 flex-wrap">
+            <button
+              onClick={scanHeader}
+              disabled={loadingHeader}
+              className="px-5 py-2 bg-emerald-600/80 hover:bg-emerald-500 active:scale-95
+                text-white text-xs font-bold rounded-lg transition-all
+                disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loadingHeader ? "Scanning..." : "📋 Header Scanner"}
+            </button>
+            <button
+              onClick={scanTls}
+              disabled={loadingTls}
+              className="px-5 py-2 bg-purple-600/80 hover:bg-purple-500 active:scale-95
+                text-white text-xs font-bold rounded-lg transition-all
+                disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loadingTls ? "Scanning..." : "🔒 TLS Scanner"}
+            </button>
+            <button
+              onClick={scanPorts}
+              disabled={loadingPort}
+              className="px-5 py-2 bg-cyan-600/80 hover:bg-cyan-500 active:scale-95
+                text-white text-xs font-bold rounded-lg transition-all
+                disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loadingPort ? "Scanning..." : "🌐 Port Scanner"}
+            </button>
+            <button
+              onClick={scanDirectories}
+              disabled={loadingDirectory}
+              className="px-5 py-2 bg-yellow-600/80 hover:bg-yellow-500 active:scale-95
+                text-white text-xs font-bold rounded-lg transition-all
+                disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loadingDirectory ? "Scanning..." : "📁 Directory Scanner"}
+            </button>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="mt-4 flex items-center gap-3 bg-red-950/50 border border-red-800/50 text-red-300
+              text-xs rounded-lg px-4 py-3">
+              <span className="text-red-500">✕</span>
+              {error}
+            </div>
+          )}
+
+          {/* Status Indicator */}
+          {scanned && !loadingHeader && !loadingTls && !loadingPort && !loadingDirectory &&(
+            <div className="mt-4 flex items-center gap-2 text-xs text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Scan complete
+            </div>
+          )}
         </div>
 
-        {/* ── Error ── */}
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-            {error}
-          </div>
-        )}
+        {/* Module Results */}
+        <HeaderScanner
+          data={headerData}
+          tlsData={tlsData}
+          loading={loadingHeader}
+        />
 
-        {/* ── Loading ── */}
-        {loading && (
-          <div className="flex items-center gap-3 text-gray-500 text-sm mb-6">
-            <svg className="animate-spin h-4 w-4 text-blue-500" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-            </svg>
-            Running header and banner analysis…
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════
-            MODULE 1 — Header Security Findings
-        ════════════════════════════════════════════ */}
-        {result && (
-          <section className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold text-gray-800">
-                Header Security Analysis
-              </h2>
-              <span className="text-xs text-gray-400 font-medium">
-                {result.total_headers_checked} headers checked
-              </span>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100 text-left">
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400">Header</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400">Value</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400">Status</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400">Severity</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400">Impact</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.findings.map((item, i) => (
-                      <tr key={i} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-3 font-medium text-gray-800 font-mono text-xs">{item.header}</td>
-                        <td className="px-4 py-3 text-gray-500 font-mono text-xs max-w-xs truncate">{item.value || "Not Present"}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusBadge(item.status)}`}>
-                            {item.status}
-                          </span>
-                        </td>
-                        <td className={`px-4 py-3 font-bold text-xs ${severityColor(item.severity)}`}>
-                          {item.severity}
-                        </td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">{item.impact}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* ═══════════════════════════════════════════
-            MODULE 2 — Server Banner Detection
-        ════════════════════════════════════════════ */}
-        {bannerResult && (
-          <section className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold text-gray-800">
-                Server Information
-              </h2>
-              <span className={`px-3 py-1 rounded-full text-xs font-bold ${severityBadgeBg(bannerResult.severity)}`}>
-                {bannerResult.severity === "None" ? "Not Exposed" : `${bannerResult.severity} Severity`}
-              </span>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-
-              {/* Info grid */}
-              <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4 mb-6">
-                <InfoRow label="Server"     value={bannerResult.server}     mono />
-                <InfoRow label="Powered By" value={bannerResult.powered_by} mono />
-                <InfoRow label="Technology" value={bannerResult.technology} />
-                <InfoRow label="Version"    value={bannerResult.version}    mono />
-              </div>
-
-              <div className="border-t border-gray-100 pt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {/* Impact */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-1">
-                    Impact
-                  </p>
-                  <p className="text-sm text-gray-700 leading-relaxed">
-                    {bannerResult.impact}
-                  </p>
-                </div>
-                {/* Recommendation */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-1">
-                    Recommendation
-                  </p>
-                  <p className="text-sm text-gray-700 leading-relaxed">
-                    {bannerResult.recommendation}
-                  </p>
-                </div>
-              </div>
-
-            </div>
-          </section>
-        )}
-
-        {/* ═══════════════════════════════════════════
-            MODULE 3 — Port Scanner
-        ════════════════════════════════════════════ */}
-        {portResult && (
-          <section className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold text-gray-800">Open Ports</h2>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-400 font-medium">
-                  {portResult.total_open_ports} open port{portResult.total_open_ports !== 1 ? "s" : ""} found
-                </span>
-                <span className={`px-3 py-1 rounded-full text-xs font-bold ${severityBadgeBg(portResult.severity)}`}>
-                  {portResult.severity === "None" ? "No Risk" : `${portResult.severity} Risk`}
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-
-              {/* Risk summary bar */}
-              <div className={`px-5 py-3 text-xs font-medium border-b border-gray-100
-                ${portResult.severity === "High"   ? "bg-red-50 text-red-700" :
-                  portResult.severity === "Medium" ? "bg-orange-50 text-orange-700" :
-                  portResult.severity === "Low"    ? "bg-blue-50 text-blue-700" :
-                                                     "bg-green-50 text-green-700"}`}>
-                {portResult.risk_summary}
-              </div>
-
-              {portResult.open_ports.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400">
-                  No open ports detected in the scanned range.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="table-auto w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-100 text-left">
-                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400 w-20">Port</th>
-                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400 w-36">Service</th>
-                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-widest text-gray-400">Possible Attacks</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {portResult.open_ports.map((item, i) => (
-                        <tr key={i} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-
-                          {/* Port number */}
-                          <td className="px-4 py-3">
-                            <span className="font-mono font-bold text-gray-800 bg-gray-100 px-2 py-0.5 rounded text-xs">
-                              {item.port}
-                            </span>
-                          </td>
-
-                          {/* Service */}
-                          <td className="px-4 py-3">
-                            <span className="font-semibold text-gray-700 text-xs">{item.service}</span>
-                          </td>
-
-                          {/* Attack tags */}
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1.5">
-                              {item.attacks.map((atk, j) => (
-                                <span
-                                  key={j}
-                                  className="px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 border border-red-100"
-                                >
-                                  {atk}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
-
+        <PortScanner
+          data={portData}
+          loading={loadingPort}
+        />
+        <DirectoryScanner
+          data={dirData}
+          loading={loadingDirectory}
+        />
       </main>
     </div>
   );
 }
-
-export default App;

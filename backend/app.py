@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from scanners.header_scanner import analyze_headers
-from scanners.banner_scanner import detect_server_banner
-from scanners.port_scanner import scan_ports
+from modules.tls_scanner import analyze_tls
+from modules.header_scanner import analyze_headers
+from modules.port_scanner import scan_ports_sync
+from modules.directory_scanner import scan_directories
 
 app = Flask(__name__)
 CORS(app)
@@ -11,35 +12,53 @@ CORS(app)
 def home():
     return {"message": "E-WMEAP Backend Running"}
 
+# Header scanner
 @app.route("/scan/header", methods=["POST"])
-def header_scan():
-
-    data = request.json
-    url = data.get("url")
-
+def scan_header():
+    data = request.get_json()
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
     result = analyze_headers(url)
-
     return jsonify(result)
 
-@app.route("/scan/banner", methods=["POST"])
-def scan_banner():
+# TLS scanner
+@app.route("/scan/tls", methods=["POST"])
+def scan_tls():
     data = request.get_json()
-    url = data.get("url")
+    url = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "URL is required"}), 400
-    result = detect_server_banner(url)
+    result = analyze_tls(url)
     return jsonify(result)
 
+# Port scanner
 @app.route("/scan/ports", methods=["POST"])
-def scan_port():
+def scan_ports():
     data = request.get_json()
-    url = data.get("url")
+    url = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "URL is required"}), 400
-    result = scan_ports(url)
-    return jsonify(result)
+    
+    try:
+        result = scan_ports_sync(url)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
+# Directory scanner
+@app.route("/scan/directories", methods=["POST"])
+def scan_dirs():
+    data = request.get_json()
+    url  = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    # Ensure scheme is present
+    if not url.startswith("http"):
+        url = "https://" + url
+    result = scan_directories(url)
+    return jsonify(result)
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, port=5000)
