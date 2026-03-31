@@ -2,6 +2,8 @@ import { useState } from "react";
 import HeaderScanner from "./components/modules/HeaderScanner";
 import PortScanner from "./components/modules/PortScanner";
 import DirectoryScanner from "./components/modules/DirectoryScanner";
+import BusinessLogicScanner from "./components/modules/BusinessLogicScanner";
+
 
 const API = "http://127.0.0.1:5000";
 
@@ -13,12 +15,15 @@ export default function App() {
   const [tlsData, setTlsData] = useState(null);
   const [portData, setPortData] = useState(null);
   const [dirData, setDirData] = useState(null);
+  const [businessData, setBusinessData] = useState(null);
 
   // Individual loading states
   const [loadingHeader, setLoadingHeader] = useState(false);
   const [loadingTls, setLoadingTls] = useState(false);
   const [loadingPort, setLoadingPort] = useState(false);
-  const[loadingDirectory, setLoadingDirectory] = useState(false);
+  const [loadingDirectory, setLoadingDirectory] = useState(false);
+  const [loadingBusiness, setLoadingBusiness] = useState(false);
+  const [jwtToken, setJwtToken] = useState("");   // optional manual JWT input
 
   const [error, setError] = useState(null);
   const [scanned, setScanned] = useState(false);
@@ -90,7 +95,7 @@ export default function App() {
     if (!url.trim()) return;
     setLoadingDirectory(true);
     setError(null);
-    
+
 
     try {
       const response = await fetch(`${API}/scan/directories`, {
@@ -110,8 +115,28 @@ export default function App() {
       setLoadingDirectory(false);
     }
 
-  };  
+  };
 
+  // Business Logic Scanner (optional, can be triggered separately or included in scanAll)
+  const scanBusiness = async () => {
+    if (!url.trim()) return;
+    setLoadingBusiness(true);
+    setBusinessData(null);
+    try {
+      const res = await fetch(`${API}/scan/business`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, jwt_token: jwtToken }),
+      });
+      const data = await res.json();
+      setBusinessData(data);
+      setScanned(true);
+    } catch {
+      setError("Cannot reach business logic scanner backend");
+    } finally {
+      setLoadingBusiness(false);
+    }
+  };
 
   // Scan all modules
   const scanAll = async () => {
@@ -120,15 +145,17 @@ export default function App() {
     setLoadingTls(true);
     setLoadingPort(true);
     setLoadingDirectory(true);
+    setLoadingBusiness(true);
     setError(null);
     setHeaderData(null);
     setTlsData(null);
     setPortData(null);
     setDirData(null);
+    setBusinessData(null);
     setScanned(false);
 
     try {
-      const [headerRes, tlsRes, portRes, dirRes] = await Promise.all([
+      const [headerRes, tlsRes, portRes, dirRes, businessRes] = await Promise.all([
         fetch(`${API}/scan/header`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -149,19 +176,26 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
         }),
+        fetch(`${API}/scan/business`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, jwt_token: jwtToken }),
+        }),
       ]);
 
-      const [headerJson, tlsJson, portJson,dirJson] = await Promise.all([
+      const [headerJson, tlsJson, portJson, dirJson, businessJson] = await Promise.all([
         headerRes.json(),
         tlsRes.json(),
         portRes.json(),
         dirRes.json(),
+        businessRes.json(),
       ]);
 
       setHeaderData(headerJson);
       setTlsData(tlsJson.error ? null : tlsJson);
       setPortData(portJson);
-      setDirData(dirJson); 
+      setDirData(dirJson);
+      setBusinessData(businessJson);
       setScanned(true);
     } catch (err) {
       setError("Cannot reach the scanner backend. Is Flask running on port 5000?");
@@ -170,6 +204,7 @@ export default function App() {
       setLoadingTls(false);
       setLoadingPort(false);
       setLoadingDirectory(false);
+      setLoadingBusiness(false);
     }
   };
 
@@ -179,6 +214,7 @@ export default function App() {
     setTlsData(null);
     setPortData(null);
     setDirData(null);
+    setBusinessData(null);
     setScanned(false);
 
     setError(null);
@@ -282,6 +318,26 @@ export default function App() {
             >
               {loadingDirectory ? "Scanning..." : "📁 Directory Scanner"}
             </button>
+            <div className="flex gap-3 items-center mt-3">
+              <span className="text-slate-600 text-xs font-mono select-none flex-shrink-0">JWT TOKEN (optional) ›</span>
+              <input
+                type="text"
+                placeholder="eyJhbGc... (paste your JWT for deeper testing)"
+                value={jwtToken}
+                onChange={(e) => setJwtToken(e.target.value)}
+                className="flex-1 bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2
+       text-xs text-slate-300 placeholder:text-slate-600 font-mono focus:outline-none
+       focus:border-purple-500/50"
+              />
+              <button
+                onClick={scanBusiness}
+                disabled={loadingBusiness}
+                className="px-5 py-2 bg-cyan-600/80 hover:bg-cyan-500 text-white text-xs
+       font-bold rounded-lg transition-all disabled:opacity-40"
+              >
+                {loadingBusiness ? "Scanning..." : "⚙ Business Logic"}
+              </button>
+            </div>
           </div>
 
           {/* Error */}
@@ -294,7 +350,7 @@ export default function App() {
           )}
 
           {/* Status Indicator */}
-          {scanned && !loadingHeader && !loadingTls && !loadingPort && !loadingDirectory &&(
+          {scanned && !loadingHeader && !loadingTls && !loadingPort && !loadingDirectory && (
             <div className="mt-4 flex items-center gap-2 text-xs text-emerald-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Scan complete
@@ -316,6 +372,10 @@ export default function App() {
         <DirectoryScanner
           data={dirData}
           loading={loadingDirectory}
+        />
+        <BusinessLogicScanner
+          data={businessData}
+          loading={loadingBusiness}
         />
       </main>
     </div>

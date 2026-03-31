@@ -4,6 +4,8 @@ from modules.tls_scanner import analyze_tls
 from modules.header_scanner import analyze_headers
 from modules.port_scanner import scan_ports_sync
 from modules.directory_scanner import scan_directories
+from modules.business_logic_scanner import scan_business_logic
+
 
 app = Flask(__name__)
 CORS(app)
@@ -58,6 +60,20 @@ def scan_dirs():
         url = "https://" + url
     result = scan_directories(url)
     return jsonify(result)
+
+# Business logic scanner
+@app.route("/scan/business", methods=["POST"])
+def scan_business():
+    data      = request.get_json()
+    url       = data.get("url", "").strip()
+    jwt_token = data.get("jwt_token", "").strip() or None
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    if not url.startswith("http"):
+        url = "https://" + url
+    result = scan_business_logic(url, jwt_token=jwt_token)
+    return jsonify(result)
+
 
 
 if __name__ == "__main__":
