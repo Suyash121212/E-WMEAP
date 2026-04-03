@@ -3,12 +3,15 @@ import HeaderScanner from "./components/modules/HeaderScanner";
 import PortScanner from "./components/modules/PortScanner";
 import DirectoryScanner from "./components/modules/DirectoryScanner";
 import BusinessLogicScanner from "./components/modules/BusinessLogicScanner";
+import GitHubScanner from "./components/modules/GitHubScanner";
+import CloudScanner from "./components/modules/CloudScanner";
 
 
 const API = "http://127.0.0.1:5000";
 
 export default function App() {
   const [url, setUrl] = useState("");
+  const [githubUrl, setGithubUrl] = useState("");
 
   // Individual module data states
   const [headerData, setHeaderData] = useState(null);
@@ -16,6 +19,9 @@ export default function App() {
   const [portData, setPortData] = useState(null);
   const [dirData, setDirData] = useState(null);
   const [businessData, setBusinessData] = useState(null);
+  const [cloudData, setCloudData] = useState(null);
+  const [loadingCloud, setLoadingCloud] = useState(false);
+  const [githubData, setGithubData] = useState(null);
 
   // Individual loading states
   const [loadingHeader, setLoadingHeader] = useState(false);
@@ -24,6 +30,7 @@ export default function App() {
   const [loadingDirectory, setLoadingDirectory] = useState(false);
   const [loadingBusiness, setLoadingBusiness] = useState(false);
   const [jwtToken, setJwtToken] = useState("");   // optional manual JWT input
+  const [loadingGithub, setLoadingGithub] = useState(false);
 
   const [error, setError] = useState(null);
   const [scanned, setScanned] = useState(false);
@@ -138,6 +145,47 @@ export default function App() {
     }
   };
 
+  // github repo scanner
+  const scanGithub = async () => {
+    if (!githubUrl.trim()) return;
+    setLoadingGithub(true);
+    setGithubData(null);
+    try {
+      const res = await fetch(`${API}/scan/github`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo_url: githubUrl }),
+      });
+
+
+      const data = await res.json();
+      setGithubData(data);
+    } catch {
+      setError("Cannot reach GitHub scanner backend");
+    } finally {
+      setLoadingGithub(false);
+    }
+  };
+
+  const scanCloud = async () => {
+    if (!url.trim()) return;
+    setLoadingCloud(true);
+    setCloudData(null);
+    try {
+      const res = await fetch(`${API}/scan/cloud`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      setCloudData(data);
+      setScanned(true);
+    } catch {
+      setError("Cannot reach cloud scanner backend");
+    } finally {
+      setLoadingCloud(false);
+    }
+  };
   // Scan all modules
   const scanAll = async () => {
     if (!url.trim()) return;
@@ -152,6 +200,7 @@ export default function App() {
     setPortData(null);
     setDirData(null);
     setBusinessData(null);
+    setCloudData(null);
     setScanned(false);
 
     try {
@@ -181,14 +230,20 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url, jwt_token: jwtToken }),
         }),
+        fetch(`${API}/scan/cloud`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        }),
       ]);
 
-      const [headerJson, tlsJson, portJson, dirJson, businessJson] = await Promise.all([
+      const [headerJson, tlsJson, portJson, dirJson, businessJson, cloudJson] = await Promise.all([
         headerRes.json(),
         tlsRes.json(),
         portRes.json(),
         dirRes.json(),
         businessRes.json(),
+        cloudRes.json(),
       ]);
 
       setHeaderData(headerJson);
@@ -196,6 +251,7 @@ export default function App() {
       setPortData(portJson);
       setDirData(dirJson);
       setBusinessData(businessJson);
+      setCloudData(cloudJson);
       setScanned(true);
     } catch (err) {
       setError("Cannot reach the scanner backend. Is Flask running on port 5000?");
@@ -205,6 +261,7 @@ export default function App() {
       setLoadingPort(false);
       setLoadingDirectory(false);
       setLoadingBusiness(false);
+      setLoadingCloud(false);      
     }
   };
 
@@ -215,6 +272,7 @@ export default function App() {
     setPortData(null);
     setDirData(null);
     setBusinessData(null);
+    setCloudData(null);
     setScanned(false);
 
     setError(null);
@@ -280,6 +338,31 @@ export default function App() {
             </button>
           </div>
 
+          <div className="flex gap-3 items-stretch mb-4 mt-6">
+            <div className="flex-1 flex items-center gap-3 bg-slate-800/60 border
+     border-slate-700/60 rounded-xl px-4 focus-within:border-purple-500/60 transition-all">
+              <span className="text-slate-600 text-xs font-mono select-none">REPO ›</span>
+              <input
+                type="text"
+                placeholder="https://github.com/owner/repo"
+                value={githubUrl}
+                onChange={(e) => setGithubUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && scanGithub()}
+                className="flex-1 bg-transparent py-3.5 text-sm text-slate-100
+        placeholder:text-slate-600 font-mono focus:outline-none"
+              />
+            </div>
+            <button
+              onClick={scanGithub}
+              disabled={loadingGithub}
+              className="px-6 py-3.5 bg-purple-600 hover:bg-purple-500
+       text-white text-sm font-bold rounded-xl transition-all
+       disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loadingGithub ? "Scanning..." : "Scan Repo"}
+            </button>
+          </div>
+
           {/* Individual Module Buttons */}
           <div className="flex gap-3 flex-wrap">
             <button
@@ -337,6 +420,13 @@ export default function App() {
               >
                 {loadingBusiness ? "Scanning..." : "⚙ Business Logic"}
               </button>
+              <button onClick={scanCloud}
+                disabled={loadingCloud}
+                className="px-5 py-2 bg-blue-600/80 hover:bg-blue-500 text-white text-xs
+       font-bold rounded-lg transition-all disabled:opacity-40"
+              >
+                {loadingCloud ? "Scanning..." : "☁️ Cloud Exposure"}
+              </button>
             </div>
           </div>
 
@@ -376,6 +466,14 @@ export default function App() {
         <BusinessLogicScanner
           data={businessData}
           loading={loadingBusiness}
+        />
+        <GitHubScanner
+          data={githubData}
+          loading={loadingGithub}
+        />
+        <CloudScanner
+          data={cloudData}
+          loading={loadingCloud}
         />
       </main>
     </div>

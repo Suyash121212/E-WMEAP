@@ -1,11 +1,14 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+  
+
 from modules.tls_scanner import analyze_tls
 from modules.header_scanner import analyze_headers
 from modules.port_scanner import scan_ports_sync
 from modules.directory_scanner import scan_directories
 from modules.business_logic_scanner import scan_business_logic
-
+from modules.github_scanner import scan_github_repo
+from modules.cloud_scanner import scan_cloud
 
 app = Flask(__name__)
 CORS(app)
@@ -74,6 +77,26 @@ def scan_business():
     result = scan_business_logic(url, jwt_token=jwt_token)
     return jsonify(result)
 
+# github repo scanner
+@app.route("/scan/github", methods=["POST"])    
+def scan_github():
+    data     = request.get_json()
+    repo_url = data.get("repo_url", "").strip()
+    if not repo_url:
+        return jsonify({"error": "repo_url is required"}), 400
+    result = scan_github_repo(repo_url)
+    return jsonify(result)
+
+@app.route("/scan/cloud", methods=["POST"])
+def scan_cloud_route():
+    data = request.get_json()
+    url  = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "URL is required"}), 400
+    if not url.startswith("http"):
+        url = "https://" + url
+    result = scan_cloud(url)
+    return jsonify(result)
 
 
 if __name__ == "__main__":
