@@ -6,6 +6,7 @@ import BusinessLogicScanner from "./components/modules/BusinessLogicScanner";
 import GitHubScanner from "./components/modules/GitHubScanner";
 import CloudScanner from "./components/modules/CloudScanner";
 
+import RiskDashboard from "./components/modules/RiskDashboard";
 
 const API = "http://127.0.0.1:5000";
 
@@ -22,6 +23,7 @@ export default function App() {
   const [cloudData, setCloudData] = useState(null);
   const [loadingCloud, setLoadingCloud] = useState(false);
   const [githubData, setGithubData] = useState(null);
+  const [riskData, setRiskData] = useState(null);
 
   // Individual loading states
   const [loadingHeader, setLoadingHeader] = useState(false);
@@ -31,9 +33,11 @@ export default function App() {
   const [loadingBusiness, setLoadingBusiness] = useState(false);
   const [jwtToken, setJwtToken] = useState("");   // optional manual JWT input
   const [loadingGithub, setLoadingGithub] = useState(false);
+  const [loadingRisk, setLoadingRisk] = useState(false);
 
   const [error, setError] = useState(null);
   const [scanned, setScanned] = useState(false);
+  const [scanId, setScanId] = useState(null);
 
   // Individual scan functions
   const scanHeader = async () => {
@@ -189,79 +193,134 @@ export default function App() {
   // Scan all modules
   const scanAll = async () => {
     if (!url.trim()) return;
+
+    // ── Reset all loading states ──
     setLoadingHeader(true);
     setLoadingTls(true);
     setLoadingPort(true);
     setLoadingDirectory(true);
     setLoadingBusiness(true);
+    setLoadingCloud(true);      // ← was missing
+    setLoadingRisk(true);       // ← was missing
     setError(null);
+
+    // ── Reset all data states ──
     setHeaderData(null);
     setTlsData(null);
     setPortData(null);
     setDirData(null);
     setBusinessData(null);
     setCloudData(null);
+    setRiskData(null);           // ← was missing
     setScanned(false);
 
     try {
-      const [headerRes, tlsRes, portRes, dirRes, businessRes] = await Promise.all([
+      // ── Step 1: Init scan to get scan_id ──────────────────────────────
+      const initRes = await fetch(`${API}/scan/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const { scan_id } = await initRes.json();
+      setScanId(scan_id);
+
+      // ── Step 2: Run all 6 module scans in parallel ────────────────────
+      const [
+        headerRes,
+        tlsRes,
+        portRes,
+        dirRes,
+        businessRes,
+        cloudRes,          // ← was fetched but never destructured
+      ] = await Promise.all([
         fetch(`${API}/scan/header`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, scan_id }),
         }),
         fetch(`${API}/scan/tls`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, scan_id }),
         }),
         fetch(`${API}/scan/ports`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, scan_id }),
         }),
         fetch(`${API}/scan/directories`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, scan_id }),
         }),
         fetch(`${API}/scan/business`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, jwt_token: jwtToken }),
+          body: JSON.stringify({ url, scan_id, jwt_token: jwtToken }),
         }),
         fetch(`${API}/scan/cloud`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, scan_id }),
         }),
       ]);
 
-      const [headerJson, tlsJson, portJson, dirJson, businessJson, cloudJson] = await Promise.all([
+      // ── Step 3: Parse all responses ───────────────────────────────────
+      const [
+        headerJson,
+        tlsJson,
+        portJson,
+        dirJson,
+        businessJson,
+        cloudJson,
+      ] = await Promise.all([
         headerRes.json(),
         tlsRes.json(),
         portRes.json(),
         dirRes.json(),
         businessRes.json(),
-        cloudRes.json(),
+        cloudRes.json(),     // ← was calling on undefined variable before
       ]);
 
+      // ── Step 4: Set module data ───────────────────────────────────────
       setHeaderData(headerJson);
       setTlsData(tlsJson.error ? null : tlsJson);
       setPortData(portJson);
       setDirData(dirJson);
       setBusinessData(businessJson);
       setCloudData(cloudJson);
+
+      // ── Step 5: Build risk report from all results ────────────────────
+      const riskRes = await fetch(`${API}/scan/risk-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scan_id,
+          url,
+          headers: headerJson,
+          tls: tlsJson,
+          ports: portJson,
+          directories: dirJson,
+          business: businessJson,
+          cloud: cloudJson,
+        }),
+      });
+      const riskJson = await riskRes.json();
+      setRiskData({ ...riskJson, scan_id });
+
       setScanned(true);
+
     } catch (err) {
       setError("Cannot reach the scanner backend. Is Flask running on port 5000?");
     } finally {
+      // ── Reset ALL loading states ──────────────────────────────────────
       setLoadingHeader(false);
       setLoadingTls(false);
       setLoadingPort(false);
       setLoadingDirectory(false);
       setLoadingBusiness(false);
-      setLoadingCloud(false);      
+      setLoadingCloud(false);
+      setLoadingRisk(false);    // ← was missing
     }
   };
 
@@ -273,6 +332,8 @@ export default function App() {
     setDirData(null);
     setBusinessData(null);
     setCloudData(null);
+    setRiskData(null);
+    setScanId(null);
     setScanned(false);
 
     setError(null);
@@ -440,15 +501,22 @@ export default function App() {
           )}
 
           {/* Status Indicator */}
-          {scanned && !loadingHeader && !loadingTls && !loadingPort && !loadingDirectory && (
-            <div className="mt-4 flex items-center gap-2 text-xs text-emerald-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Scan complete
-            </div>
-          )}
+          {/* // Find your status indicator JSX and add !loadingRisk */}
+          {scanned && !loadingHeader && !loadingTls && !loadingPort
+            && !loadingDirectory && !loadingBusiness && !loadingCloud
+            && !loadingRisk && (                    // ← add this
+              <div className="mt-4 flex items-center gap-2 text-xs text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Scan complete
+              </div>
+            )}
         </div>
 
         {/* Module Results */}
+        <RiskDashboard
+          data={riskData}
+          loading={loadingRisk}
+        />
         <HeaderScanner
           data={headerData}
           tlsData={tlsData}
