@@ -19,6 +19,23 @@ SESSION = requests.Session()
 SESSION.headers.update({
     "User-Agent": "Mozilla/5.0 (compatible; E-WMEAP-Scanner/1.0)",
 })
+REQUEST_TIMEOUT_SECONDS = 8
+
+
+def _safe_json(response: requests.Response) -> dict:
+    try:
+        data = response.json()
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _decode_jwt_segment(segment: str) -> dict:
+    padded = segment + "=" * (-len(segment) % 4)
+    try:
+        return json.loads(base64.urlsafe_b64decode(padded.encode()))
+    except (ValueError, json.JSONDecodeError):
+        return {}
 
 SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "None": 4}
 
@@ -406,7 +423,7 @@ def _extract_jwt_from_response(base_url: str) -> str | None:
     """Try to find a JWT in common response headers/cookies."""
     for path in JWT_TEST_ENDPOINTS[:5]:
         try:
-            r = SESSION.get(base_url.rstrip("/") + path, timeout=6)
+            r = SESSION.get(base_url.rstrip("/") + path, timeout=REQUEST_TIMEOUT_SECONDS)
             # Check Authorization header echo or Set-Cookie
             auth = r.headers.get("Authorization", "")
             if auth.startswith("Bearer "):
@@ -418,15 +435,12 @@ def _extract_jwt_from_response(base_url: str) -> str | None:
                 if _is_valid_jwt_format(v):
                     return v
             # Check JSON body
-            try:
-                data = r.json()
-                for key in ("token", "access_token", "jwt", "accessToken", "id_token"):
-                    val = data.get(key, "")
-                    if val and _is_valid_jwt_format(str(val)):
-                        return str(val)
-            except Exception:
-                pass
-        except Exception:
+            data = _safe_json(r)
+            for key in ("token", "access_token", "jwt", "accessToken", "id_token"):
+                val = data.get(key, "")
+                if val and _is_valid_jwt_format(str(val)):
+                    return str(val)
+        except requests.RequestException:
             continue
     return None
 
@@ -436,29 +450,19 @@ def _is_valid_jwt_format(token: str) -> bool:
     if len(parts) != 3:
         return False
     try:
-        base64.b64decode(parts[0] + "==")
-        base64.b64decode(parts[1] + "==")
+        base64.urlsafe_b64decode((parts[0] + "=" * (-len(parts[0]) % 4)).encode())
+        base64.urlsafe_b64decode((parts[1] + "=" * (-len(parts[1]) % 4)).encode())
         return True
-    except Exception:
+    except ValueError:
         return False
 
 
 def _decode_jwt_header(token: str) -> dict:
-    try:
-        header_b64 = token.split(".")[0]
-        padded = header_b64 + "=" * (4 - len(header_b64) % 4)
-        return json.loads(base64.b64decode(padded))
-    except Exception:
-        return {}
+    return _decode_jwt_segment(token.split(".")[0])
 
 
 def _decode_jwt_payload(token: str) -> dict:
-    try:
-        payload_b64 = token.split(".")[1]
-        padded = payload_b64 + "=" * (4 - len(payload_b64) % 4)
-        return json.loads(base64.b64decode(padded))
-    except Exception:
-        return {}
+    return _decode_jwt_segment(token.split(".")[1])
 
 
 def _build_alg_none_token(original_token: str) -> str:

@@ -19,6 +19,27 @@ SESSION.headers.update({
     "User-Agent": "Mozilla/5.0 (compatible; E-WMEAP-Scanner/1.0)",
 })
 SESSION.max_redirects = 2
+DEFAULT_TIMEOUT_SECONDS = 8
+LONG_TIMEOUT_SECONDS = 15
+
+
+def _safe_request(method: str, url: str, *, timeout: int = DEFAULT_TIMEOUT_SECONDS, **kwargs):
+    try:
+        return SESSION.request(method, url, timeout=timeout, **kwargs)
+    except requests.RequestException:
+        return None
+
+
+def _collect_completed_results(futures) -> list:
+    results = []
+    for future in as_completed(futures):
+        try:
+            result = future.result()
+        except Exception:
+            continue
+        if result:
+            results.append(result)
+    return results
 
 SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "None": 4}
 
@@ -94,7 +115,9 @@ def _check_s3_bucket(bucket_name: str) -> dict | None:
     }
 
     try:
-        r = SESSION.head(url, timeout=8)
+        r = _safe_request("HEAD", url)
+        if r is None:
+            return None
         result["status_code"] = r.status_code
 
         if r.status_code == 404:
@@ -116,8 +139,8 @@ def _check_s3_bucket(bucket_name: str) -> dict | None:
 
             # List bucket contents
             list_url = f"{url}/?list-type=2&max-keys=50"
-            lr = SESSION.get(list_url, timeout=10)
-            if lr.status_code == 200:
+            lr = _safe_request("GET", list_url, timeout=10)
+            if lr and lr.status_code == 200:
                 files, sensitive = _parse_s3_listing(lr.text)
                 result["files"]       = files[:30]
                 result["file_count"]  = len(files)
@@ -135,9 +158,7 @@ def _check_s3_bucket(bucket_name: str) -> dict | None:
 
             return result
 
-    except requests.exceptions.ConnectionError:
-        return None  # Bucket definitely does not exist
-    except Exception:
+    except ValueError:
         return None
 
     return None
@@ -193,10 +214,7 @@ def scan_s3(domain: str) -> dict:
     findings = []
     with ThreadPoolExecutor(max_workers=15) as ex:
         futures = {ex.submit(_check_s3_bucket, name): name for name in candidates}
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                findings.append(result)
+        findings.extend(_collect_completed_results(futures))
 
     findings.sort(key=lambda f: SEV_ORDER.get(f["severity"], 99))
     overall = findings[0]["severity"] if findings else "None"
@@ -268,12 +286,13 @@ def _get_subdomains_crtsh(domain: str) -> list:
     """
     subdomains = set()
     try:
-        r = SESSION.get(
+        r = _safe_request(
+            "GET",
             "https://crt.sh/",
             params={"q": f"%.{domain}", "output": "json"},
-            timeout=15,
+            timeout=LONG_TIMEOUT_SECONDS,
         )
-        if r.status_code == 200:
+        if r and r.status_code == 200:
             data = r.json()
             for entry in data:
                 name = entry.get("name_value", "")
@@ -293,12 +312,13 @@ def _get_subdomains_hackertarget(domain: str) -> list:
     """
     subdomains = []
     try:
-        r = SESSION.get(
+        r = _safe_request(
+            "GET",
             "https://api.hackertarget.com/hostsearch/",
             params={"q": domain},
             timeout=10,
         )
-        if r.status_code == 200 and "error" not in r.text.lower():
+        if r and r.status_code == 200 and "error" not in r.text.lower():
             for line in r.text.splitlines():
                 if "," in line:
                     subdomain = line.split(",")[0].strip().lower()
@@ -340,11 +360,27 @@ def _check_takeover(subdomain: str) -> dict | None:
             # CNAME matches a known service — now check if the service
             # shows a "not found" fingerprint (unclaimed)
             try:
-                r = SESSION.get(
+                r = _safe_request(
+                    "GET",
                     f"http://{subdomain}",
                     timeout=8,
                     allow_redirects=True,
                 )
+                if r is None:
+                    return {
+                        "subdomain":   subdomain,
+                        "cname":       cname,
+                        "service":     service,
+                        "severity":    "Medium",
+                        "fingerprint": None,
+                        "status_code": None,
+                        "exploitable": False,
+                        "description": (
+                            f"Subdomain {subdomain} has dangling CNAME to {service} "
+                            "but could not be reached to confirm takeover."
+                        ),
+                        "technique": {},
+                    }
                 body = r.text
                 if body_fingerprint.lower() in body.lower():
                     return {
@@ -420,10 +456,7 @@ def scan_subdomains(domain: str) -> dict:
     findings = []
     with ThreadPoolExecutor(max_workers=15) as ex:
         futures = {ex.submit(_check_takeover, sub): sub for sub in all_subs}
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                findings.append(result)
+        findings.extend(_collect_completed_results(futures))
 
     findings.sort(key=lambda f: SEV_ORDER.get(f["severity"], 99))
     exploitable = [f for f in findings if f["exploitable"]]
@@ -619,7 +652,9 @@ def _check_cloud_service(base_url: str, path: str, service: str,
 
     for url in urls_to_try:
         try:
-            r = SESSION.get(url, timeout=6, allow_redirects=False)
+            r = _safe_request("GET", url, timeout=6, allow_redirects=False)
+            if r is None:
+                continue
             if r.status_code in (404, 301, 302, 307, 308):
                 continue
             if r.status_code >= 500:
@@ -757,18 +792,17 @@ def scan_cloud_services(base_url: str) -> dict:
             for path, service, severity, description, verifier, ports
             in CLOUD_SERVICE_CHECKS
         }
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                # Deduplicate by service+verifier
-                existing = next(
-                    (f for f in findings
-                     if f["verifier_key"] == result["verifier_key"]
-                     and f["severity"] == result["severity"]),
-                    None
-                )
-                if not existing:
-                    findings.append(result)
+        for result in _collect_completed_results(futures):
+            existing = next(
+                (
+                    finding for finding in findings
+                    if finding["verifier_key"] == result["verifier_key"]
+                    and finding["severity"] == result["severity"]
+                ),
+                None,
+            )
+            if not existing:
+                findings.append(result)
 
     findings.sort(key=lambda f: SEV_ORDER.get(f["severity"], 99))
     overall = findings[0]["severity"] if findings else "None"
