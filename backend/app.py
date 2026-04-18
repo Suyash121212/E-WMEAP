@@ -1,7 +1,9 @@
 import io
+from pathlib import Path
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask import send_file
+from dotenv import load_dotenv
 from modules.tls_scanner import analyze_tls
 from modules.header_scanner import analyze_headers
 from modules.port_scanner import scan_ports_sync
@@ -10,6 +12,10 @@ from modules.business_logic_scanner import scan_business_logic
 from modules.github_scanner import scan_github_repo
 from modules.cloud_scanner import scan_cloud
 from modules.risk_engine import build_risk_report, generate_pdf
+
+# Ensure env vars are loaded regardless of current working directory.
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
+
 app = Flask(__name__)
 CORS(app)
 SCAN_STORE = {} 

@@ -20,6 +20,7 @@ import threading
 import requests
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import uuid
 
 # ── Session ───────────────────────────────────────────────────────────────────
 SESSION = requests.Session()
@@ -134,7 +135,147 @@ SEV_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
 # ── HTTP probe ────────────────────────────────────────────────────────────────
 
-def _probe(base_url: str, path: str) -> dict | None:
+
+def _get_baseline(base_url: str) -> dict:
+    """
+    Request a guaranteed-nonexistent path to fingerprint server's
+    default response. Used to filter out SPA catch-all false positives.
+    """
+    fake = f"/{uuid.uuid4().hex}/ewmeap_nonexistent_test_path"
+    try:
+        r = SESSION.get(
+            base_url.rstrip("/") + fake,
+            timeout=6,
+            allow_redirects=False,
+        )
+        return {
+            "status":          r.status_code,
+            "content_length":  len(r.content),
+            "redirect_target": r.headers.get("Location", ""),
+            "content_sample":  r.text[:200] if r.status_code == 200 else "",
+        }
+    except Exception:
+        return {
+            "status": 404, "content_length": 0,
+            "redirect_target": "", "content_sample": "",
+        }
+    
+# What genuine files must contain to be considered real
+CONTENT_SIGNATURES = {
+    "/.git/config":       ["[core]", "repositoryformatversion", "[remote"],
+    "/.git/HEAD":         ["ref: refs/", "heads/"],
+    "/.env":              ["DB_", "APP_", "SECRET", "KEY=", "PASSWORD=", "TOKEN=", "URL="],
+    "/.env.local":        ["DB_", "APP_", "SECRET", "KEY=", "PASSWORD="],
+    "/.env.production":   ["DB_", "APP_", "SECRET", "KEY=", "PASSWORD="],
+    "/.env.backup":       ["DB_", "APP_", "SECRET", "KEY=", "PASSWORD="],
+    "/.env.example":      ["DB_", "APP_", "SECRET", "KEY=", "="],
+    "/wp-config.php":     ["DB_NAME", "DB_PASSWORD", "table_prefix", "define("],
+    "/config.php":        ["<?php", "define(", "DB_", "password"],
+    "/config.json":       ['"key"', '"secret"', '"password"', '"token"', '"database"'],
+    "/.aws/credentials":  ["aws_access_key_id", "aws_secret", "[default]", "AKIA"],
+    "/credentials.json":  ['"type"', '"private_key"', '"client_email"'],
+    "/phpinfo.php":       ["PHP Version", "phpinfo()", "php.ini"],
+    "/server-status":     ["Apache Server Status", "requests currently being processed"],
+    "/.htaccess":         ["RewriteEngine", "Options", "Allow", "Deny", "AuthType"],
+    "/robots.txt":        ["User-agent:", "Disallow:", "Allow:"],
+    "/sitemap.xml":       ["<urlset", "<sitemap", "<?xml"],
+    "/.bash_history":     ["ssh ", "mysql ", "export ", "cd ", "sudo "],
+    "/settings.py":       ["SECRET_KEY", "DATABASES", "ALLOWED_HOSTS", "django"],
+    "/database.yml":      ["adapter:", "database:", "username:", "password:"],
+    "/docker-compose.yml":["services:", "image:", "container_name:"],
+}
+
+# If response contains these → it's a generic HTML page (false positive)
+HTML_INDICATORS = [
+    "<!doctype html", "<html", "<head>", "</html>",
+    "react", "__next", "vercel", "window.__",
+    "<title>", "<meta charset", "<script src",
+    "webpack", "bundle.js", "chunk.js",
+]
+
+def _is_genuine_response(path: str, content: str, status: int) -> tuple[bool, str]:
+    """
+    Returns (is_genuine, reason).
+    Rejects HTML/SPA catch-all pages and content that doesn't
+    match what the path should actually contain.
+    """
+    if not content:
+        # No body — 403 with no content is still valid (file exists, blocked)
+        return status == 403, "No content body"
+
+    content_lower = content.lower().strip()
+
+    # ── Check 1: Reject if it looks like an HTML page ──────────────────
+    html_hits = sum(1 for sig in HTML_INDICATORS if sig in content_lower)
+    if html_hits >= 2:
+        return False, f"Response is HTML page (SPA catch-all) — {html_hits} HTML indicators found"
+
+    # ── Check 2: Verify content matches expected file signatures ────────
+    signatures = CONTENT_SIGNATURES.get(path)
+    if signatures:
+        matched = sum(1 for sig in signatures if sig.lower() in content_lower)
+        if matched == 0:
+            return False, f"Content doesn't match expected format for {path}"
+        return True, f"Content matches {matched} signature(s) for {path}"
+
+    # ── Check 3: For paths without specific signatures ───────────────────
+    # If it passed the HTML check, consider it genuine
+    return True, "Passed HTML filter — content appears genuine"
+
+def _probe(base_url: str, path: str, baseline: dict) -> dict | None:
+    """
+    Probe a single path. Compares against baseline to reject false positives.
+    Also validates content matches expected file type.
+    """
+    url = base_url.rstrip("/") + path
+    try:
+        r = SESSION.get(url, timeout=6, allow_redirects=False)
+        status = r.status_code
+
+        # Always skip
+        if status == 404 or status >= 500:
+            return None
+
+        content = r.text[:2000] if len(r.content) < 50_000 else ""
+
+        # ── Baseline comparison ──────────────────────────────────────────
+        if status == baseline["status"]:
+            if status in (301, 302):
+                # Same redirect target as baseline → server redirects everything
+                this_redirect = r.headers.get("Location", "")
+                if this_redirect == baseline["redirect_target"]:
+                    return None
+
+            if status == 403:
+                # Server returns 403 for all unknown paths → not a real finding
+                return None
+
+            if status == 200:
+                # Compare content length — if too similar to baseline, it's a catch-all
+                this_len     = len(r.content)
+                baseline_len = baseline["content_length"]
+                if baseline_len > 0:
+                    diff_ratio = abs(this_len - baseline_len) / baseline_len
+                    if diff_ratio < 0.15:
+                        return None  # Same page returned for all paths
+
+        # ── Content validation ───────────────────────────────────────────
+        if status == 200:
+            is_genuine, reason = _is_genuine_response(path, content, status)
+            if not is_genuine:
+                return None
+
+        content_preview = content[:500] if status == 200 else None
+
+        return {
+            "status":            status,
+            "content_preview":   content_preview,
+            "content_length":    len(r.content),
+            "redirect_location": r.headers.get("Location", None),
+        }
+
+    except Exception:
+        return None
     """
     Send a GET request to base_url+path.
     Returns finding dict if interesting (200, 301, 302, 403), else None.
@@ -400,9 +541,11 @@ def scan_directories(url: str) -> dict:
     robots_hidden = []
 
     # ── Threaded probing ──────────────────────────────────────────────────────
+    baseline = _get_baseline(base_url)   # ← add this line
+
     def probe_one(entry):
         path, category, severity, description = entry
-        result = _probe(base_url, path)
+        result = _probe(base_url, path, baseline)   # ← pass baseline
         if result is None:
             return None
 

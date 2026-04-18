@@ -5,13 +5,18 @@
 import os
 import socket
 import requests
+from pathlib import Path
+from dotenv import load_dotenv
 
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "E-WMEAP-Scanner/1.0"})
 
-SHODAN_KEY    = os.environ.get("SHODAN_API_KEY", "")
-OTX_KEY       = os.environ.get("OTX_API_KEY", "")
-ABUSEIPDB_KEY = os.environ.get("ABUSEIPDB_API_KEY", "")
+# backend/modules/risk_engine/threat_intel.py -> backend/.env
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+
+
+def _env(name: str) -> str:
+    return os.environ.get(name, "").strip()
 
 
 def _resolve_ip(domain: str) -> str | None:
@@ -24,12 +29,13 @@ def _resolve_ip(domain: str) -> str | None:
 # ── Shodan ────────────────────────────────────────────────────────────────────
 
 def _query_shodan(ip: str) -> dict:
-    if not SHODAN_KEY:
+    shodan_key = _env("SHODAN_API_KEY")
+    if not shodan_key:
         return {"available": False, "reason": "SHODAN_API_KEY not set"}
     try:
         r = SESSION.get(
             f"https://api.shodan.io/shodan/host/{ip}",
-            params={"key": SHODAN_KEY},
+            params={"key": shodan_key},
             timeout=10,
         )
         if r.status_code == 404:
@@ -72,10 +78,11 @@ def _query_shodan(ip: str) -> dict:
 # ── AlienVault OTX ────────────────────────────────────────────────────────────
 
 def _query_otx(domain: str, ip: str = None) -> dict:
-    if not OTX_KEY:
+    otx_key = _env("OTX_API_KEY")
+    if not otx_key:
         return {"available": False, "reason": "OTX_API_KEY not set"}
 
-    headers = {"X-OTX-API-KEY": OTX_KEY}
+    headers = {"X-OTX-API-KEY": otx_key}
     results = {"available": True, "domain": domain}
 
     try:
@@ -121,12 +128,13 @@ def _query_otx(domain: str, ip: str = None) -> dict:
 # ── AbuseIPDB ─────────────────────────────────────────────────────────────────
 
 def _query_abuseipdb(ip: str) -> dict:
-    if not ABUSEIPDB_KEY:
+    abuseipdb_key = _env("ABUSEIPDB_API_KEY")
+    if not abuseipdb_key:
         return {"available": False, "reason": "ABUSEIPDB_API_KEY not set"}
     try:
         r = SESSION.get(
             "https://api.abuseipdb.com/api/v2/check",
-            headers={"Key": ABUSEIPDB_KEY, "Accept": "application/json"},
+            headers={"Key": abuseipdb_key, "Accept": "application/json"},
             params={"ipAddress": ip, "maxAgeInDays": 90, "verbose": True},
             timeout=10,
         )
@@ -190,9 +198,9 @@ def enrich_threat_intel(domain: str) -> dict:
         "otx":               otx,
         "abuseipdb":         abuse,
         "api_keys_configured": {
-            "shodan":    bool(SHODAN_KEY),
-            "otx":       bool(OTX_KEY),
-            "abuseipdb": bool(ABUSEIPDB_KEY),
+            "shodan":    bool(_env("SHODAN_API_KEY")),
+            "otx":       bool(_env("OTX_API_KEY")),
+            "abuseipdb": bool(_env("ABUSEIPDB_API_KEY")),
         },
     }
 
