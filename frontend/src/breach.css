@@ -1,0 +1,266 @@
+/* src/breach.css — Global styles for BREACH PROTOCOL UI */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Orbitron:wght@400;700;900&display=swap');
+
+/* ── CSS Variables ───────────────────────────────────────────────────────── */
+:root {
+  --green:      #00ff41;
+  --green-dim:  #00aa2a;
+  --green-glow: rgba(0, 255, 65, 0.15);
+  --red:        #ff0040;
+  --red-dim:    #aa0028;
+  --red-glow:   rgba(255, 0, 64, 0.2);
+  --blue:       #0080ff;
+  --blue-glow:  rgba(0, 128, 255, 0.2);
+  --amber:      #ffaa00;
+  --amber-glow: rgba(255, 170, 0, 0.15);
+  --bg:         #050510;
+  --bg2:        #080818;
+  --surface:    #0a0a1e;
+  --surface2:   #0f0f28;
+  --border:     rgba(0, 255, 65, 0.12);
+  --border2:    rgba(0, 128, 255, 0.15);
+  --text:       #c8ffd4;
+  --text-dim:   #4a7a52;
+  --font-mono:  'JetBrains Mono', monospace;
+  --font-disp:  'Orbitron', monospace;
+}
+
+/* ── Base reset ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-mono);
+  background:  var(--bg);
+  color:       var(--text);
+  overflow-x:  hidden;
+  cursor:      crosshair;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 2px; }
+
+/* ── Scanline overlay ────────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* ── CRT vignette ────────────────────────────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 60%,
+    rgba(0, 0, 0, 0.6) 100%
+  );
+  pointer-events: none;
+  z-index: 9997;
+}
+
+/* ── Perspective grid floor ──────────────────────────────────────────────── */
+.grid-floor {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 50vh;
+  background-image:
+    linear-gradient(rgba(0,255,65,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,65,0.08) 1px, transparent 1px);
+  background-size: 60px 60px;
+  transform: perspective(600px) rotateX(60deg);
+  transform-origin: bottom center;
+  pointer-events: none;
+  z-index: 0;
+  animation: gridPulse 4s ease-in-out infinite;
+}
+
+@keyframes gridPulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 0.8; }
+}
+
+/* ── Glitch animation ────────────────────────────────────────────────────── */
+@keyframes glitch {
+  0%   { clip-path: inset(0 0 98% 0); transform: translate(-4px, 0); }
+  10%  { clip-path: inset(30% 0 50% 0); transform: translate(4px, 0); }
+  20%  { clip-path: inset(60% 0 20% 0); transform: translate(-2px, 0); }
+  30%  { clip-path: inset(80% 0 5% 0);  transform: translate(3px, 0); }
+  40%  { clip-path: inset(10% 0 70% 0); transform: translate(-3px, 0); }
+  50%  { clip-path: inset(40% 0 40% 0); transform: translate(2px, 0); }
+  100% { clip-path: inset(0 0 98% 0);   transform: translate(0, 0); }
+}
+
+.glitch {
+  position: relative;
+}
+.glitch::before,
+.glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+}
+.glitch::before {
+  color: var(--red);
+  animation: glitch 3s infinite linear alternate-reverse;
+  opacity: 0.6;
+}
+.glitch::after {
+  color: var(--blue);
+  animation: glitch 2s infinite linear alternate;
+  opacity: 0.4;
+}
+
+/* ── Text typewriter cursor ──────────────────────────────────────────────── */
+.cursor::after {
+  content: '█';
+  animation: blink 1s step-end infinite;
+  color: var(--green);
+  margin-left: 2px;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Glow utilities ──────────────────────────────────────────────────────── */
+.glow-green { text-shadow: 0 0 10px var(--green), 0 0 30px var(--green-dim); }
+.glow-red   { text-shadow: 0 0 10px var(--red),   0 0 30px var(--red-dim); }
+.glow-blue  { text-shadow: 0 0 10px var(--blue); }
+
+.box-glow-green { box-shadow: 0 0 20px var(--green-glow), inset 0 0 20px var(--green-glow); }
+.box-glow-red   { box-shadow: 0 0 20px var(--red-glow),   inset 0 0 20px var(--red-glow); }
+.box-glow-blue  { box-shadow: 0 0 20px var(--blue-glow),  inset 0 0 10px var(--blue-glow); }
+
+/* ── Finding card slam-in animation ─────────────────────────────────────── */
+@keyframes slamIn {
+  0%   { transform: translateX(-60px) skewX(-8deg); opacity: 0; }
+  60%  { transform: translateX(6px) skewX(1deg); opacity: 1; }
+  100% { transform: translateX(0) skewX(0); opacity: 1; }
+}
+.slam-in { animation: slamIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+/* ── Critical alert flash ────────────────────────────────────────────────── */
+@keyframes criticalFlash {
+  0%, 100% { background: transparent; }
+  50%       { background: rgba(255, 0, 64, 0.06); }
+}
+.critical-flash { animation: criticalFlash 0.6s ease; }
+
+/* ── Module status pulse ─────────────────────────────────────────────────── */
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--green); }
+  50%       { opacity: 0.5; box-shadow: 0 0 2px var(--green); }
+}
+.status-pulse { animation: statusPulse 1.2s ease-in-out infinite; }
+
+/* ── Progress bar shimmer ────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.progress-bar {
+  background: linear-gradient(
+    90deg,
+    var(--green-dim) 0%,
+    var(--green) 40%,
+    #80ffaa 50%,
+    var(--green) 60%,
+    var(--green-dim) 100%
+  );
+  background-size: 200% auto;
+  animation: shimmer 2s linear infinite;
+}
+
+/* ── Fade up entrance ────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.5s ease forwards; }
+
+/* ── Score counter drop ──────────────────────────────────────────────────── */
+@keyframes scoreDrop {
+  0%   { transform: translateY(-40px) scale(1.3); opacity: 0; }
+  60%  { transform: translateY(6px) scale(0.95); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.score-drop { animation: scoreDrop 0.7s cubic-bezier(0.22,1,0.36,1) forwards; }
+
+/* ── Scan complete banner ────────────────────────────────────────────────── */
+@keyframes bannerDrop {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+.banner-drop { animation: bannerDrop 0.5s cubic-bezier(0.22,1,0.36,1) forwards; }
+
+/* ── Red screen flash on critical ────────────────────────────────────────── */
+@keyframes redFlash {
+  0%   { opacity: 0; }
+  20%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.red-flash-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 0, 64, 0.08);
+  pointer-events: none;
+  z-index: 9999;
+  animation: redFlash 0.8s ease forwards;
+}
+
+/* ── Particle canvas ─────────────────────────────────────────────────────── */
+#particle-canvas {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Three.js canvas container ───────────────────────────────────────────── */
+#threejs-mount {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Terminal text ───────────────────────────────────────────────────────── */
+.terminal-text {
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── Neon border ─────────────────────────────────────────────────────────── */
+.neon-border {
+  border: 1px solid var(--green-dim);
+  box-shadow: 0 0 8px var(--green-glow), inset 0 0 8px rgba(0,255,65,0.02);
+}
+.neon-border-red {
+  border: 1px solid rgba(255,0,64,0.4);
+  box-shadow: 0 0 8px var(--red-glow), inset 0 0 8px rgba(255,0,64,0.02);
+}
+.neon-border-blue {
+  border: 1px solid rgba(0,128,255,0.3);
+  box-shadow: 0 0 8px var(--blue-glow);
+}
+
+/* ── Hex background pattern ──────────────────────────────────────────────── */
+.hex-bg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0-4l24-14V18L28 4 4 18v30l24 14z' fill='none' stroke='rgba(0,255,65,0.04)' stroke-width='1'/%3E%3C/svg%3E");
+  background-size: 56px 100px;
+}

@@ -1,548 +1,382 @@
-import { useState } from "react";
+// src/App.jsx — BREACH PROTOCOL UI
+import { useState, useRef } from "react";
+import "./breach.css";
+
+import ParticleField from "./components/ui/ParticleField";
+import ThreeScene from "./components/ui/ThreeScene";
+import HeroInput from "./components/ui/HeroInput";
+import ScanTerminal from "./components/ui/ScanTerminal";
+import ScanCompleteBanner from "./components/ui/ScanCompleteBanner";
+
 import HeaderScanner from "./components/modules/HeaderScanner";
 import PortScanner from "./components/modules/PortScanner";
 import DirectoryScanner from "./components/modules/DirectoryScanner";
-import BusinessLogicScanner from "./components/modules/BusinessLogicScanner";
 import GitHubScanner from "./components/modules/GitHubScanner";
+import BusinessLogicScanner from "./components/modules/BusinessLogicScanner";
 import CloudScanner from "./components/modules/CloudScanner";
-
 import RiskDashboard from "./components/modules/RiskDashboard";
 
 const API = "http://127.0.0.1:5000";
 
+const MODULES = [
+  { key: "header", endpoint: "/scan/header", label: "HEADER ANALYSIS", canRun: ({ url }) => !!url, body: ({ url, sid }) => ({ url, scan_id: sid }) },
+  { key: "tls", endpoint: "/scan/tls", label: "TLS INSPECTION", canRun: ({ url }) => !!url, body: ({ url, sid }) => ({ url, scan_id: sid }) },
+  { key: "ports", endpoint: "/scan/ports", label: "PORT RECON", canRun: ({ url }) => !!url, body: ({ url, sid }) => ({ url, scan_id: sid }) },
+  { key: "directories", endpoint: "/scan/directories", label: "DIRECTORY ENUM", canRun: ({ url }) => !!url, body: ({ url, sid }) => ({ url, scan_id: sid }) },
+  { key: "business", endpoint: "/scan/business", label: "BUSINESS LOGIC", canRun: ({ url }) => !!url, body: ({ url, jwt, sid }) => ({ url, scan_id: sid, jwt_token: jwt }) },
+  { key: "cloud", endpoint: "/scan/cloud", label: "CLOUD MISCONFIG", canRun: ({ url }) => !!url, body: ({ url, sid }) => ({ url, scan_id: sid }) },
+  { key: "github", endpoint: "/scan/github", label: "GITHUB SECRETS", canRun: ({ repoUrl }) => !!repoUrl, body: ({ repoUrl, sid }) => ({ repo_url: repoUrl, scan_id: sid }) },
+];
+
+const LOG_LINES = {
+  header: ["Fetching HTTP response headers...", "Analysing Content-Security-Policy...", "Testing HSTS configuration...", "Checking X-Frame-Options...", "Querying Mozilla Observatory..."],
+  tls: ["Resolving target hostname...", "Initiating TLS handshake...", "Extracting certificate details...", "Checking HSTS preload list...", "Grading cipher suite strength..."],
+  ports: ["Running Nmap service scan...", "Probing common attack-surface ports...", "Fingerprinting detected services...", "Querying NVD for CVEs..."],
+  directories: ["Establishing baseline response...", "Fuzzing 80+ sensitive paths...", "Validating content signatures...", "Checking for .git exposure...", "Testing GraphQL introspection..."],
+  business: ["Testing CORS origin reflection...", "Probing null origin bypass...", "Analysing JWT algorithm...", "Attempting alg:none bypass...", "Scanning GraphQL schema..."],
+  cloud: ["Enumerating S3 bucket candidates...", "Querying crt.sh for subdomains...", "Checking CNAME fingerprints...", "Probing Docker API...", "Testing Kubernetes dashboard..."],
+  github: ["Resolving repository metadata...", "Enumerating repository tree...", "Scanning commits for leaked secrets...", "Checking sensitive file patterns...", "Scoring repository exposure..."],
+  risk: ["Aggregating all findings...", "Calculating CVSS v3.1 scores...", "Running chain detection rules...", "Querying threat intelligence...", "Generating security grade..."],
+};
+
+const MODULE_TABS = [
+  { key: "risk", label: "RISK", color: "#ff6600" },
+  { key: "header", label: "HEADERS", color: "#00ff41" },
+  { key: "tls", label: "TLS", color: "#0080ff" },
+  { key: "ports", label: "PORTS", color: "#ff0040" },
+  { key: "directories", label: "DIRS", color: "#ffaa00" },
+  { key: "business", label: "LOGIC", color: "#aa00ff" },
+  { key: "cloud", label: "CLOUD", color: "#00aaff" },
+  { key: "github", label: "GITHUB", color: "#8b5cf6" },
+];
+
+function gradeColor(g) {
+  return g === "A+" || g === "A" ? "#00ff41" : g === "B" ? "#0080ff" : g === "C" ? "#ffaa00" : g === "D" ? "#ff6600" : "#ff0040";
+}
+
+function normalizeTargetUrl(url) {
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://")
+    ? trimmed
+    : `https://${trimmed}`;
+}
+
+function normalizeRepoUrl(repoUrl) {
+  const trimmed = repoUrl.trim();
+  if (!trimmed) return "";
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://")
+    ? trimmed
+    : `https://github.com/${trimmed.replace(/^github\.com\//, "")}`;
+}
+
 export default function App() {
-  const [url, setUrl] = useState("");
-  const [githubUrl, setGithubUrl] = useState("");
-
-  // Individual module data states
-  const [headerData, setHeaderData] = useState(null);
-  const [tlsData, setTlsData] = useState(null);
-  const [portData, setPortData] = useState(null);
-  const [dirData, setDirData] = useState(null);
-  const [businessData, setBusinessData] = useState(null);
-  const [cloudData, setCloudData] = useState(null);
-  const [loadingCloud, setLoadingCloud] = useState(false);
-  const [githubData, setGithubData] = useState(null);
-  const [riskData, setRiskData] = useState(null);
-
-  // Individual loading states
-  const [loadingHeader, setLoadingHeader] = useState(false);
-  const [loadingTls, setLoadingTls] = useState(false);
-  const [loadingPort, setLoadingPort] = useState(false);
-  const [loadingDirectory, setLoadingDirectory] = useState(false);
-  const [loadingBusiness, setLoadingBusiness] = useState(false);
-  const [jwtToken, setJwtToken] = useState("");   // optional manual JWT input
-  const [loadingGithub, setLoadingGithub] = useState(false);
-  const [loadingRisk, setLoadingRisk] = useState(false);
-
-  const [error, setError] = useState(null);
-  const [scanned, setScanned] = useState(false);
+  const [phase, setPhase] = useState("landing");
+  const [scanMode, setScanMode] = useState("full");
+  const [target, setTarget] = useState("");
+  const [repoTarget, setRepoTarget] = useState("");
+  const [jwtToken, setJwtToken] = useState("");
   const [scanId, setScanId] = useState(null);
+  const [results, setResults] = useState({});
+  const [moduleStatuses, setModuleStatuses] = useState({});
+  const [moduleProgress, setModuleProgress] = useState({});
+  const [moduleFindings, setModuleFindings] = useState({});
+  const [liveLog, setLiveLog] = useState([]);
+  const [riskData, setRiskData] = useState(null);
+  const [error, setError] = useState(null);
+  const [activeModule, setActiveModule] = useState(null);
+  const logIdx = useRef({});
 
-  // Individual scan functions
-  const scanHeader = async () => {
-    if (!url.trim()) return;
-    setLoadingHeader(true);
-    setError(null);
+  const addLog = (line) => setLiveLog(prev => [...prev.slice(-30), line]);
 
+  const extractFindings = (key, data) => {
     try {
-      const response = await fetch(`${API}/scan/header`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await response.json();
-      setHeaderData(data);
-      setScanned(true);
-    } catch (err) {
-      setError("Cannot reach header scanner backend");
-    } finally {
-      setLoadingHeader(false);
-    }
+      if (key === "header") return data.findings || [];
+      if (key === "tls") return (data.issues || []).map(i => ({ severity: "Medium", type: i }));
+      if (key === "ports") return data.open_ports || [];
+      if (key === "directories") return data.findings || [];
+      if (key === "business") {
+        const all = [];
+        ["cors", "jwt", "graphql"].forEach(s => (data[s]?.findings || []).forEach(f => all.push(f)));
+        return all;
+      }
+      if (key === "cloud") {
+        const all = [];
+        (data.s3?.findings || []).forEach(f => all.push(f));
+        (data.subdomains?.takeover_findings || []).forEach(f => all.push(f));
+        (data.services?.findings || []).forEach(f => all.push(f));
+        return all;
+      }
+      if (key === "github") return data.secrets || [];
+    } catch { return []; }
+    return [];
   };
 
-  const scanTls = async () => {
-    if (!url.trim()) return;
-    setLoadingTls(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`${API}/scan/tls`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await response.json();
-      setTlsData(data.error ? null : data);
-      setScanned(true);
-    } catch (err) {
-      setError("Cannot reach TLS scanner backend");
-    } finally {
-      setLoadingTls(false);
-    }
+  const runProgressTicks = (key) => {
+    let tick = 0; logIdx.current[key] = 0;
+    const lines = LOG_LINES[key] || [];
+    const id = setInterval(() => {
+      tick++;
+      setModuleProgress(p => ({ ...p, [key]: Math.min(88, tick * 12) }));
+      const li = logIdx.current[key];
+      if (li < lines.length) { addLog(lines[li]); logIdx.current[key]++; }
+    }, 600);
+    return id;
   };
 
-  const scanPorts = async () => {
-    if (!url.trim()) return;
-    setLoadingPort(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`${API}/scan/ports`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await response.json();
-      setPortData(data);
-      setScanned(true);
-    } catch (err) {
-      setError("Cannot reach port scanner backend");
-    } finally {
-      setLoadingPort(false);
-    }
-  };
-  const scanDirectories = async () => {
-    if (!url.trim()) return;
-    setLoadingDirectory(true);
-    setError(null);
-
-
-    try {
-      const response = await fetch(`${API}/scan/directories`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await response.json();
-      // Handle directory scanner data if needed
-      setDirData(data);
-      setScanned(true);
-
-    } catch (err) {
-      setError("Cannot reach directory scanner backend");
-    }
-    finally {
-      setLoadingDirectory(false);
+  const scanModule = async (mod, sid, context) => {
+    if (!mod.canRun(context)) {
+      setModuleStatuses(p => ({ ...p, [mod.key]: "done" }));
+      setModuleProgress(p => ({ ...p, [mod.key]: 100 }));
+      setModuleFindings(p => ({ ...p, [mod.key]: [] }));
+      addLog(`[${mod.label}] Skipped (missing required target)`);
+      return null;
     }
 
-  };
-
-  // Business Logic Scanner (optional, can be triggered separately or included in scanAll)
-  const scanBusiness = async () => {
-    if (!url.trim()) return;
-    setLoadingBusiness(true);
-    setBusinessData(null);
+    setModuleStatuses(p => ({ ...p, [mod.key]: "scanning" }));
+    setModuleProgress(p => ({ ...p, [mod.key]: 5 }));
+    addLog(`[${mod.label}] Initiating...`);
+    const ticker = runProgressTicks(mod.key);
     try {
-      const res = await fetch(`${API}/scan/business`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, jwt_token: jwtToken }),
-      });
+      const res = await fetch(`${API}${mod.endpoint}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mod.body({ ...context, sid, jwt: jwtToken })) });
       const data = await res.json();
-      setBusinessData(data);
-      setScanned(true);
-    } catch {
-      setError("Cannot reach business logic scanner backend");
-    } finally {
-      setLoadingBusiness(false);
-    }
-  };
-
-  // github repo scanner
-  const scanGithub = async () => {
-    if (!githubUrl.trim()) return;
-    setLoadingGithub(true);
-    setGithubData(null);
-    try {
-      const res = await fetch(`${API}/scan/github`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: githubUrl }),
-      });
-
-
-      const data = await res.json();
-      setGithubData(data);
-    } catch {
-      setError("Cannot reach GitHub scanner backend");
-    } finally {
-      setLoadingGithub(false);
-    }
-  };
-
-  const scanCloud = async () => {
-    if (!url.trim()) return;
-    setLoadingCloud(true);
-    setCloudData(null);
-    try {
-      const res = await fetch(`${API}/scan/cloud`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
-      setCloudData(data);
-      setScanned(true);
-    } catch {
-      setError("Cannot reach cloud scanner backend");
-    } finally {
-      setLoadingCloud(false);
-    }
-  };
-  // Scan all modules
-  const scanAll = async () => {
-    if (!url.trim()) return;
-
-    // ── Reset all loading states ──
-    setLoadingHeader(true);
-    setLoadingTls(true);
-    setLoadingPort(true);
-    setLoadingDirectory(true);
-    setLoadingBusiness(true);
-    setLoadingCloud(true);      // ← was missing
-    setLoadingRisk(true);       // ← was missing
-    setError(null);
-
-    // ── Reset all data states ──
-    setHeaderData(null);
-    setTlsData(null);
-    setPortData(null);
-    setDirData(null);
-    setBusinessData(null);
-    setCloudData(null);
-    setRiskData(null);           // ← was missing
-    setScanned(false);
-
-    try {
-      // ── Step 1: Init scan to get scan_id ──────────────────────────────
-      const initRes = await fetch(`${API}/scan/init`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const { scan_id } = await initRes.json();
-      setScanId(scan_id);
-
-      // ── Step 2: Run all 6 module scans in parallel ────────────────────
-      const [
-        headerRes,
-        tlsRes,
-        portRes,
-        dirRes,
-        businessRes,
-        cloudRes,          // ← was fetched but never destructured
-      ] = await Promise.all([
-        fetch(`${API}/scan/header`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, scan_id }),
-        }),
-        fetch(`${API}/scan/tls`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, scan_id }),
-        }),
-        fetch(`${API}/scan/ports`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, scan_id }),
-        }),
-        fetch(`${API}/scan/directories`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, scan_id }),
-        }),
-        fetch(`${API}/scan/business`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, scan_id, jwt_token: jwtToken }),
-        }),
-        fetch(`${API}/scan/cloud`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, scan_id }),
-        }),
-      ]);
-
-      // ── Step 3: Parse all responses ───────────────────────────────────
-      const [
-        headerJson,
-        tlsJson,
-        portJson,
-        dirJson,
-        businessJson,
-        cloudJson,
-      ] = await Promise.all([
-        headerRes.json(),
-        tlsRes.json(),
-        portRes.json(),
-        dirRes.json(),
-        businessRes.json(),
-        cloudRes.json(),     // ← was calling on undefined variable before
-      ]);
-
-      // ── Step 4: Set module data ───────────────────────────────────────
-      setHeaderData(headerJson);
-      setTlsData(tlsJson.error ? null : tlsJson);
-      setPortData(portJson);
-      setDirData(dirJson);
-      setBusinessData(businessJson);
-      setCloudData(cloudJson);
-
-      // ── Step 5: Build risk report from all results ────────────────────
-      const riskRes = await fetch(`${API}/scan/risk-report`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scan_id,
-          url,
-          headers: headerJson,
-          tls: tlsJson,
-          ports: portJson,
-          directories: dirJson,
-          business: businessJson,
-          cloud: cloudJson,
-        }),
-      });
-      const riskJson = await riskRes.json();
-      setRiskData({ ...riskJson, scan_id });
-
-      setScanned(true);
-
+      clearInterval(ticker);
+      setModuleProgress(p => ({ ...p, [mod.key]: 100 }));
+      setModuleStatuses(p => ({ ...p, [mod.key]: "done" }));
+      setResults(p => ({ ...p, [mod.key]: data }));
+      const findings = extractFindings(mod.key, data);
+      setModuleFindings(p => ({ ...p, [mod.key]: findings }));
+      const crit = findings.filter(f => f.severity === "Critical").length;
+      addLog(`[${mod.label}] Done — ${findings.length} findings${crit ? `, ${crit} critical` : ""}`);
+      return data;
     } catch (err) {
-      setError("Cannot reach the scanner backend. Is Flask running on port 5000?");
-    } finally {
-      // ── Reset ALL loading states ──────────────────────────────────────
-      setLoadingHeader(false);
-      setLoadingTls(false);
-      setLoadingPort(false);
-      setLoadingDirectory(false);
-      setLoadingBusiness(false);
-      setLoadingCloud(false);
-      setLoadingRisk(false);    // ← was missing
+      clearInterval(ticker);
+      setModuleProgress(p => ({ ...p, [mod.key]: 100 }));
+      setModuleStatuses(p => ({ ...p, [mod.key]: "done" }));
+      addLog(`[${mod.label}] Error: ${err.message}`);
+      return null;
     }
   };
 
-  // Clear all results
-  const clearResults = () => {
-    setHeaderData(null);
-    setTlsData(null);
-    setPortData(null);
-    setDirData(null);
-    setBusinessData(null);
-    setCloudData(null);
-    setRiskData(null);
-    setScanId(null);
-    setScanned(false);
+  const startScan = async ({ url, repoUrl, repoOnly = false }) => {
+    const normalizedUrl = normalizeTargetUrl(url || "");
+    const normalizedRepoUrl = normalizeRepoUrl(repoUrl || "");
+    setTarget(normalizedUrl); setPhase("scanning"); setError(null);
+    setScanMode(repoOnly ? "repo" : "full");
+    setRepoTarget(normalizedRepoUrl);
+    setResults({}); setRiskData(null); setLiveLog([]);
+    setModuleStatuses({}); setModuleProgress({}); setModuleFindings({});
+    setActiveModule(repoOnly ? "github" : null);
+    const initSt = {};
+    MODULES.forEach(m => { initSt[m.key] = repoOnly && m.key !== "github" ? "done" : "waiting"; });
+    initSt.risk = repoOnly ? "done" : "waiting";
+    setModuleStatuses(initSt);
 
-    setError(null);
+    addLog("BREACH PROTOCOL INITIATED");
+    if (repoOnly) addLog("Mode: REPOSITORY-ONLY SCAN");
+    if (normalizedUrl) addLog(`Web Target: ${normalizedUrl}`);
+    if (normalizedRepoUrl) addLog(`GitHub Repo: ${normalizedRepoUrl}`);
+
+    let sid = null;
+    try {
+      const ir = await fetch(`${API}/scan/init`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: normalizedUrl || normalizedRepoUrl }) });
+      const ij = await ir.json(); sid = ij.scan_id; setScanId(sid);
+      addLog(`Session: ${sid}`);
+    } catch { addLog("Session init skipped"); }
+
+    addLog("─".repeat(36));
+
+    const context = { url: normalizedUrl, repoUrl: normalizedRepoUrl };
+    const allData = {};
+    for (const mod of MODULES) {
+      if (repoOnly && mod.key !== "github") continue;
+      const data = await scanModule(mod, sid, context);
+      if (data) allData[mod.key] = data;
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    addLog("─".repeat(36));
+    if (!repoOnly && normalizedUrl) {
+      setModuleStatuses(p => ({ ...p, risk: "scanning" }));
+      setModuleProgress(p => ({ ...p, risk: 10 }));
+      const riskTicker = runProgressTicks("risk");
+      try {
+        const rr = await fetch(`${API}/scan/risk-report`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scan_id: sid, url: normalizedUrl, headers: allData.header, tls: allData.tls, ports: allData.ports, directories: allData.directories, business: allData.business, cloud: allData.cloud }) });
+        const rj = await rr.json();
+        clearInterval(riskTicker);
+        setModuleProgress(p => ({ ...p, risk: 100 }));
+        setModuleStatuses(p => ({ ...p, risk: "done" }));
+        setRiskData({ ...rj, scan_id: sid });
+        addLog(`RISK ENGINE — Grade: ${rj.overall_grade} (${rj.overall_score}/100)`);
+      } catch {
+        clearInterval(riskTicker);
+        setModuleStatuses(p => ({ ...p, risk: "done" }));
+        addLog("Risk engine unavailable");
+      }
+    } else {
+      setModuleProgress(p => ({ ...p, risk: 100 }));
+      setModuleStatuses(p => ({ ...p, risk: "done" }));
+      addLog(repoOnly ? "RISK ENGINE — Skipped (repository-only mode)" : "RISK ENGINE — Skipped (web target not provided)");
+    }
+
+    addLog("BREACH PROTOCOL COMPLETE");
+    setPhase("results");
   };
+
+  const startRepoScan = async (repoUrl) => {
+    await startScan({ url: "", repoUrl, repoOnly: true });
+  };
+
+  const handleReset = () => { setPhase("landing"); setScanMode("full"); setTarget(""); setRepoTarget(""); setResults({}); setRiskData(null); };
 
   return (
-    <div className="min-h-screen bg-[#0a0f1e] text-slate-100" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
-      <header className="border-b border-slate-800 bg-[#080d1a]/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center gap-4">
-          <div className="flex items-center gap-2.5">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <polygon points="12,2 22,7 22,17 12,22 2,17 2,7" stroke="#3b82f6" strokeWidth="1.5" fill="none" />
-              <polygon points="12,6 18,9.5 18,16.5 12,20 6,16.5 6,9.5" fill="#3b82f6" opacity="0.15" />
-              <circle cx="12" cy="12" r="2.5" fill="#3b82f6" />
-            </svg>
-            <span className="font-bold text-sm tracking-tight text-white">E-WMEAP</span>
-          </div>
-          <span className="text-slate-600 text-xs hidden sm:block">
-            / Enterprise Web Misconfiguration & Exposure Assessment Platform
-          </span>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", position: "relative", overflowX: "hidden" }}>
+      <ParticleField />
+      <div className="grid-floor" />
+
+      {/* NAV */}
+      <nav style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 100, borderBottom: "1px solid rgba(0,255,65,0.08)", background: "rgba(5,5,16,0.85)", backdropFilter: "blur(20px)", padding: "0 24px", height: "52px", display: "flex", alignItems: "center", gap: "16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <svg width="20" height="20" viewBox="0 0 40 40" fill="none">
+            <polygon points="20,2 38,11 38,29 20,38 2,29 2,11" stroke="#00ff41" strokeWidth="1.5" fill="none" style={{ filter: "drop-shadow(0 0 4px rgba(0,255,65,0.5))" }} />
+            <circle cx="20" cy="20" r="4" fill="#00ff41" />
+          </svg>
+          <span style={{ fontFamily: "var(--font-disp)", fontSize: "13px", fontWeight: 700, color: "#00ff41", letterSpacing: "0.1em", textShadow: "0 0 10px rgba(0,255,65,0.4)" }}>E-WMEAP</span>
         </div>
-      </header>
+        {target && <span style={{ color: "rgba(0,255,65,0.55)", fontSize: "10px", fontFamily: "var(--font-mono)" }}>{target}</span>}
+        {!target && repoTarget && <span style={{ color: "rgba(139,92,246,0.45)", fontSize: "10px", fontFamily: "var(--font-mono)" }}>{repoTarget}</span>}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "12px" }}>
+          {phase === "scanning" && <span style={{ color: "#00ff41", fontSize: "10px", fontFamily: "var(--font-mono)", display: "flex", alignItems: "center", gap: "6px" }}><span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#00ff41", display: "inline-block", animation: "statusPulse 1s infinite" }} />SCANNING</span>}
+          {phase === "results" && riskData && <span style={{ color: gradeColor(riskData.overall_grade), fontSize: "12px", fontFamily: "var(--font-disp)", fontWeight: 700 }}>GRADE: {riskData.overall_grade}</span>}
+          {phase !== "landing" && <button onClick={handleReset} style={{ padding: "6px 14px", background: "transparent", border: "1px solid rgba(0,255,65,0.3)", borderRadius: "6px", color: "rgba(0,255,65,0.82)", fontFamily: "var(--font-mono)", fontSize: "10px", cursor: "pointer", letterSpacing: "0.1em" }}>RESET</button>}
+        </div>
+      </nav>
 
-      <main className="max-w-6xl mx-auto px-6 py-10">
-        {/* Hero / Input */}
-        <div className="mb-12">
-          <h1 className="text-3xl font-black tracking-tight text-white mb-1">
-            Security Scanner
-          </h1>
-          <p className="text-sm text-slate-500 mb-8">
-            Analyse headers, TLS, services, and exposure signals for any target URL.
-          </p>
+      <main style={{ paddingTop: "52px", position: "relative", zIndex: 5 }}>
 
-          {/* URL bar */}
-          <div className="flex gap-3 items-stretch mb-4">
-            <div className="flex-1 flex items-center gap-3 bg-slate-800/60 border border-slate-700/60 rounded-xl px-4
-              focus-within:border-blue-500/60 focus-within:bg-slate-800 transition-all">
-              <span className="text-slate-600 text-xs font-mono select-none">TARGET ›</span>
-              <input
-                type="text"
-                placeholder="https://example.com"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && scanAll()}
-                className="flex-1 bg-transparent py-3.5 text-sm text-slate-100 placeholder:text-slate-600
-                  font-mono focus:outline-none"
-              />
-            </div>
-            <button
-              onClick={scanAll}
-              className="px-8 py-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95
-                text-white text-sm font-bold rounded-xl transition-all
-                shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_28px_rgba(59,130,246,0.5)]"
-            >
-              Scan All
-            </button>
-            <button
-              onClick={clearResults}
-              className="px-4 py-3.5 bg-slate-700 hover:bg-slate-600 active:scale-95
-                text-white text-sm font-bold rounded-xl transition-all"
-            >
-              Clear
-            </button>
-          </div>
-
-          <div className="flex gap-3 items-stretch mb-4 mt-6">
-            <div className="flex-1 flex items-center gap-3 bg-slate-800/60 border
-     border-slate-700/60 rounded-xl px-4 focus-within:border-purple-500/60 transition-all">
-              <span className="text-slate-600 text-xs font-mono select-none">REPO ›</span>
-              <input
-                type="text"
-                placeholder="https://github.com/owner/repo"
-                value={githubUrl}
-                onChange={(e) => setGithubUrl(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && scanGithub()}
-                className="flex-1 bg-transparent py-3.5 text-sm text-slate-100
-        placeholder:text-slate-600 font-mono focus:outline-none"
-              />
-            </div>
-            <button
-              onClick={scanGithub}
-              disabled={loadingGithub}
-              className="px-6 py-3.5 bg-purple-600 hover:bg-purple-500
-       text-white text-sm font-bold rounded-xl transition-all
-       disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loadingGithub ? "Scanning..." : "Scan Repo"}
-            </button>
-          </div>
-
-          {/* Individual Module Buttons */}
-          <div className="flex gap-3 flex-wrap">
-            <button
-              onClick={scanHeader}
-              disabled={loadingHeader}
-              className="px-5 py-2 bg-emerald-600/80 hover:bg-emerald-500 active:scale-95
-                text-white text-xs font-bold rounded-lg transition-all
-                disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loadingHeader ? "Scanning..." : "📋 Header Scanner"}
-            </button>
-            <button
-              onClick={scanTls}
-              disabled={loadingTls}
-              className="px-5 py-2 bg-purple-600/80 hover:bg-purple-500 active:scale-95
-                text-white text-xs font-bold rounded-lg transition-all
-                disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loadingTls ? "Scanning..." : "🔒 TLS Scanner"}
-            </button>
-            <button
-              onClick={scanPorts}
-              disabled={loadingPort}
-              className="px-5 py-2 bg-cyan-600/80 hover:bg-cyan-500 active:scale-95
-                text-white text-xs font-bold rounded-lg transition-all
-                disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loadingPort ? "Scanning..." : "🌐 Port Scanner"}
-            </button>
-            <button
-              onClick={scanDirectories}
-              disabled={loadingDirectory}
-              className="px-5 py-2 bg-yellow-600/80 hover:bg-yellow-500 active:scale-95
-                text-white text-xs font-bold rounded-lg transition-all
-                disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loadingDirectory ? "Scanning..." : "📁 Directory Scanner"}
-            </button>
-            <div className="flex gap-3 items-center mt-3">
-              <span className="text-slate-600 text-xs font-mono select-none flex-shrink-0">JWT TOKEN (optional) ›</span>
-              <input
-                type="text"
-                placeholder="eyJhbGc... (paste your JWT for deeper testing)"
-                value={jwtToken}
-                onChange={(e) => setJwtToken(e.target.value)}
-                className="flex-1 bg-slate-800/40 border border-slate-700/40 rounded-lg px-3 py-2
-       text-xs text-slate-300 placeholder:text-slate-600 font-mono focus:outline-none
-       focus:border-purple-500/50"
-              />
-              <button
-                onClick={scanBusiness}
-                disabled={loadingBusiness}
-                className="px-5 py-2 bg-cyan-600/80 hover:bg-cyan-500 text-white text-xs
-       font-bold rounded-lg transition-all disabled:opacity-40"
-              >
-                {loadingBusiness ? "Scanning..." : "⚙ Business Logic"}
-              </button>
-              <button onClick={scanCloud}
-                disabled={loadingCloud}
-                className="px-5 py-2 bg-blue-600/80 hover:bg-blue-500 text-white text-xs
-       font-bold rounded-lg transition-all disabled:opacity-40"
-              >
-                {loadingCloud ? "Scanning..." : "☁️ Cloud Exposure"}
-              </button>
+        {/* ── LANDING ── */}
+        {phase === "landing" && (
+          <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px" }}>
+            <div style={{ width: "100%", maxWidth: "680px" }}>
+              <HeroInput onScan={startScan} onRepoScan={startRepoScan} scanning={false} />
             </div>
           </div>
+        )}
 
-          {/* Error */}
-          {error && (
-            <div className="mt-4 flex items-center gap-3 bg-red-950/50 border border-red-800/50 text-red-300
-              text-xs rounded-lg px-4 py-3">
-              <span className="text-red-500">✕</span>
-              {error}
+        {/* ── SCANNING ── */}
+        {phase === "scanning" && (
+          <div style={{ position: "relative", height: "calc(100vh - 52px)", overflow: "hidden" }}>
+            <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
+              <ThreeScene phase="scanning" />
             </div>
-          )}
 
-          {/* Status Indicator */}
-          {/* // Find your status indicator JSX and add !loadingRisk */}
-          {scanned && !loadingHeader && !loadingTls && !loadingPort
-            && !loadingDirectory && !loadingBusiness && !loadingCloud
-            && !loadingRisk && (                    // ← add this
-              <div className="mt-4 flex items-center gap-2 text-xs text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Scan complete
+            <div style={{ position: "relative", zIndex: 2, height: "100%", padding: "12px", display: "flex", flexDirection: "column" }}>
+              <div style={{ padding: "10px 14px", marginBottom: "10px", background: "rgba(3,8,15,0.8)", border: "1px solid rgba(0,255,65,0.2)", borderRadius: "10px", fontFamily: "var(--font-mono)", fontSize: "11px", color: "rgba(226,232,240,0.92)", letterSpacing: "0.08em" }}>
+                <span style={{ color: "#00ff41", fontWeight: 700 }}>TARGET ACQUIRED</span>
+                {target && <span style={{ marginLeft: "10px", color: "#00ff41" }}>{target}</span>}
+                {repoTarget && <span style={{ marginLeft: "10px", color: "#c4b5fd" }}>{repoTarget}</span>}
               </div>
-            )}
-        </div>
 
-        {/* Module Results */}
-        <RiskDashboard
-          data={riskData}
-          loading={loadingRisk}
-        />
-        <HeaderScanner
-          data={headerData}
-          tlsData={tlsData}
-          loading={loadingHeader}
-        />
+              <div style={{ flex: 1, background: "rgba(0,5,0,0.45)", border: "1px solid rgba(0,255,65,0.2)", borderRadius: "12px", overflow: "hidden" }}>
+                <ScanTerminal target={target} moduleStatuses={moduleStatuses} moduleProgress={moduleProgress} moduleFindings={moduleFindings} liveLog={liveLog} phase="scanning" />
+              </div>
+            </div>
+          </div>
+        )}
 
-        <PortScanner
-          data={portData}
-          loading={loadingPort}
-        />
-        <DirectoryScanner
-          data={dirData}
-          loading={loadingDirectory}
-        />
-        <BusinessLogicScanner
-          data={businessData}
-          loading={loadingBusiness}
-        />
-        <GitHubScanner
-          data={githubData}
-          loading={loadingGithub}
-        />
-        <CloudScanner
-          data={cloudData}
-          loading={loadingCloud}
-        />
+        {/* ── RESULTS ── */}
+        {phase === "results" && (
+          scanMode === "repo" ? (
+            <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "24px" }}>
+              <div style={{ marginBottom: "16px", padding: "10px 14px", border: "1px solid rgba(167,139,250,0.3)", borderRadius: "10px", background: "rgba(30,20,55,0.35)", color: "#c4b5fd", fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.08em" }}>
+                REPOSITORY-ONLY RESULTS
+              </div>
+              {results.github
+                ? <GitHubScanner data={results.github} loading={false} />
+                : <div style={{ textAlign: "center", padding: "48px", color: "rgba(167,139,250,0.45)", fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.15em" }}>NO GITHUB RESULTS AVAILABLE</div>
+              }
+            </div>
+          ) : (
+            <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "24px" }}>
+              <div style={{ marginBottom: "20px" }}>
+                <ScanCompleteBanner report={riskData} onReset={handleReset} />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "16px", marginBottom: "20px" }}>
+                <div style={{ background: "rgba(0,5,0,0.4)", border: "1px solid rgba(0,255,65,0.08)", borderRadius: "12px", overflow: "hidden", maxHeight: "320px" }}>
+                  <ScanTerminal target={target} moduleStatuses={moduleStatuses} moduleProgress={moduleProgress} moduleFindings={moduleFindings} liveLog={liveLog} phase="complete" />
+                </div>
+                <div style={{ background: "rgba(0,5,0,0.4)", border: "1px solid rgba(0,255,65,0.08)", borderRadius: "12px", overflow: "hidden", height: "320px" }}>
+                  <ThreeScene phase="results" scanData={riskData} />
+                </div>
+              </div>
+
+              {error && <div style={{ background: "rgba(255,0,64,0.08)", border: "1px solid rgba(255,0,64,0.3)", borderRadius: "10px", padding: "12px 16px", color: "#ff0040", fontSize: "12px", fontFamily: "var(--font-mono)", marginBottom: "16px" }}>✕ {error}</div>}
+
+              {/* ── Module tabs — bigger, cleaner ── */}
+              <div style={{ display: "flex", gap: "8px", marginBottom: "20px", flexWrap: "wrap", padding: "16px", background: "rgba(0,5,0,0.4)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: "14px" }}>
+                <span style={{ color: "rgba(255,255,255,0.2)", fontSize: "10px", fontFamily: "var(--font-mono)", letterSpacing: "0.2em", alignSelf: "center", marginRight: "8px" }}>VIEW MODULE →</span>
+                {MODULE_TABS.map(tab => {
+                  const hasData = tab.key === "risk" ? !!riskData : !!results[tab.key];
+                  const isActive = activeModule === tab.key;
+                  const findingCount = tab.key === "risk" ? (riskData?.total_findings || 0) :
+                    tab.key === "header" ? (results.header?.findings?.length || 0) :
+                      tab.key === "ports" ? (results.ports?.open_ports?.length || 0) :
+                        tab.key === "directories" ? (results.directories?.total_found || 0) :
+                          tab.key === "business" ? ((results.business?.cors?.findings?.length || 0) + (results.business?.jwt?.findings?.length || 0) + (results.business?.graphql?.findings?.length || 0)) :
+                            tab.key === "cloud" ? ((results.cloud?.s3?.findings?.length || 0) + (results.cloud?.subdomains?.takeover_findings?.length || 0) + (results.cloud?.services?.findings?.length || 0)) : 0;
+                  return (
+                    <button key={tab.key}
+                      onClick={() => setActiveModule(isActive ? null : tab.key)}
+                      disabled={!hasData}
+                      style={{
+                        padding: "10px 20px",
+                        background: isActive ? `${tab.color}20` : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${isActive ? tab.color : "rgba(255,255,255,0.08)"}`,
+                        borderRadius: "8px",
+                        color: hasData ? (isActive ? tab.color : "rgba(255,255,255,0.5)") : "rgba(255,255,255,0.1)",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: "11px",
+                        letterSpacing: "0.1em",
+                        fontWeight: isActive ? 700 : 400,
+                        cursor: hasData ? "pointer" : "not-allowed",
+                        transition: "all 0.2s",
+                        boxShadow: isActive ? `0 0 16px ${tab.color}25` : "none",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}>
+                      {tab.label}
+                      {hasData && findingCount > 0 && (
+                        <span style={{
+                          background: isActive ? `${tab.color}30` : "rgba(255,255,255,0.08)",
+                          color: isActive ? tab.color : "rgba(255,255,255,0.4)",
+                          borderRadius: "4px",
+                          padding: "1px 6px",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                        }}>
+                          {findingCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Module results */}
+              <div>
+                {activeModule === "risk" && riskData && <div className="fade-up"><RiskDashboard data={riskData} loading={false} /></div>}
+                {activeModule === "header" && results.header && <div className="fade-up"><HeaderScanner data={results.header} tlsData={results.tls} loading={false} /></div>}
+                {activeModule === "ports" && results.ports && <div className="fade-up"><PortScanner data={results.ports} loading={false} /></div>}
+                {activeModule === "directories" && results.directories && <div className="fade-up"><DirectoryScanner data={results.directories} loading={false} /></div>}
+                {activeModule === "business" && results.business && <div className="fade-up"><BusinessLogicScanner data={results.business} loading={false} /></div>}
+                {activeModule === "cloud" && results.cloud && <div className="fade-up"><CloudScanner data={results.cloud} loading={false} /></div>}
+                {activeModule === "github" && results.github && <div className="fade-up"><GitHubScanner data={results.github} loading={false} /></div>}
+                {!activeModule && <div style={{ textAlign: "center", padding: "48px", color: "rgba(148,163,184,0.62)", fontFamily: "var(--font-mono)", fontSize: "11px", letterSpacing: "0.15em" }}>SELECT A MODULE TAB ABOVE TO VIEW DETAILED RESULTS</div>}
+              </div>
+            </div>
+          )
+        )}
       </main>
     </div>
   );

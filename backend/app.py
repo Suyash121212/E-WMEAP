@@ -16,6 +16,13 @@ from modules.risk_engine import build_risk_report, generate_pdf
 # Ensure env vars are loaded regardless of current working directory.
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
+
+def normalize_url(url: str) -> str:
+    url = (url or "").strip()
+    if url and not url.startswith(("http://", "https://")):
+        return f"https://{url}"
+    return url
+
 app = Flask(__name__)
 CORS(app)
 SCAN_STORE = {} 
@@ -27,7 +34,7 @@ def home():
 @app.route("/scan/header", methods=["POST"])
 def scan_header():
     data = request.get_json()
-    url = data.get("url", "").strip()
+    url = normalize_url(data.get("url", ""))
     scan_id = data.get("scan_id","")
     
     if not url:
@@ -41,7 +48,7 @@ def scan_header():
 @app.route("/scan/tls", methods=["POST"])
 def scan_tls():
     data = request.get_json()
-    url = data.get("url", "").strip()
+    url = normalize_url(data.get("url", ""))
     scan_id = data.get("scan_id","")
     if not url:
         return jsonify({"error": "URL is required"}), 400
@@ -55,7 +62,7 @@ def scan_tls():
 @app.route("/scan/ports", methods=["POST"])
 def scan_ports():
     data = request.get_json()
-    url = data.get("url", "").strip()
+    url = normalize_url(data.get("url", ""))
     scan_id = data.get("scan_id","")
     if not url:
         return jsonify({"error": "URL is required"}), 400
@@ -72,14 +79,11 @@ def scan_ports():
 @app.route("/scan/directories", methods=["POST"])
 def scan_dirs():
     data = request.get_json()
-    url  = data.get("url", "").strip()
+    url  = normalize_url(data.get("url", ""))
     scan_id = data.get("scan_id","")
 
     if not url:
         return jsonify({"error": "URL is required"}), 400
-    # Ensure scheme is present
-    if not url.startswith("http"):
-        url = "https://" + url
     result = scan_directories(url)
     if scan_id and scan_id in SCAN_STORE:
         SCAN_STORE[scan_id]["directories"] = result
@@ -90,13 +94,11 @@ def scan_dirs():
 @app.route("/scan/business", methods=["POST"])
 def scan_business():
     data      = request.get_json()
-    url       = data.get("url", "").strip()
+    url       = normalize_url(data.get("url", ""))
     scan_id   = data.get("scan_id","")
     jwt_token = data.get("jwt_token", "").strip() or None
     if not url:
         return jsonify({"error": "URL is required"}), 400
-    if not url.startswith("http"):
-        url = "https://" + url
     result = scan_business_logic(url, jwt_token=jwt_token)
     if scan_id and scan_id in SCAN_STORE:
         SCAN_STORE[scan_id]["business_logic"] = result
@@ -120,12 +122,10 @@ def scan_github():
 @app.route("/scan/cloud", methods=["POST"])
 def scan_cloud_route():
     data = request.get_json()
-    url  = data.get("url", "").strip()
+    url  = normalize_url(data.get("url", ""))
     scan_id = data.get("scan_id","")
     if not url:
         return jsonify({"error": "URL is required"}), 400
-    if not url.startswith("http"):
-        url = "https://" + url
     result = scan_cloud(url)
     if scan_id and scan_id in SCAN_STORE:
         SCAN_STORE[scan_id]["cloud"] = result
@@ -135,17 +135,22 @@ def scan_cloud_route():
 def scan_init():
     import time, uuid
     data    = request.get_json()
-    url     = data.get("url","").strip()
+    url     = normalize_url(data.get("url", ""))
     scan_id = str(uuid.uuid4())[:8]
     SCAN_STORE[scan_id] = {"url": url, "created_at": time.time()}
     return jsonify({"scan_id": scan_id})
 @app.route("/scan/risk-report", methods=["POST"])
 def risk_report():
+    import time
+
     data    = request.get_json()
     scan_id = data.get("scan_id","")
-    url     = data.get("url","").strip()
+    url     = normalize_url(data.get("url", ""))
 
-    scan_results = SCAN_STORE.get(scan_id, {})
+    if not scan_id:
+        return jsonify({"error": "scan_id is required"}), 400
+
+    scan_results = SCAN_STORE.setdefault(scan_id, {"url": url, "created_at": time.time()})
     for key in ("headers","tls","ports","directories","business","secrets","cloud","banner"):
         if key in data:
             scan_results[key] = data[key]
