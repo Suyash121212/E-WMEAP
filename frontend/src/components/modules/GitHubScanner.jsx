@@ -1,119 +1,213 @@
 // frontend/src/components/modules/GitHubScanner.jsx
-// Module 4B — GitHub Repository Secret Scanner
+// Module 4B — GitHub Repository Secret Scanner — Redesigned
 
 import { useState } from "react";
-import { SeverityBadge, SEVERITY_STYLES } from "../ui/SeverityBadge";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Severity config ───────────────────────────────────────────────────────────
+const SEV = {
+  Critical: { color: "#ff0040", bg: "rgba(255,0,64,0.08)",   border: "rgba(255,0,64,0.25)",   dot: "#ff0040" },
+  High:     { color: "#ff6600", bg: "rgba(255,102,0,0.08)",  border: "rgba(255,102,0,0.25)",  dot: "#ff6600" },
+  Medium:   { color: "#ffaa00", bg: "rgba(255,170,0,0.08)",  border: "rgba(255,170,0,0.25)",  dot: "#ffaa00" },
+  Low:      { color: "#0080ff", bg: "rgba(0,128,255,0.08)",  border: "rgba(0,128,255,0.25)",  dot: "#0080ff" },
+  None:     { color: "#00cc44", bg: "rgba(0,204,68,0.08)",   border: "rgba(0,204,68,0.2)",    dot: "#00cc44" },
+};
+const s = (sev) => SEV[sev] ?? SEV.Low;
 
-function StatCard({ label, value, color = "text-slate-200" }) {
+// ── Shared primitives ─────────────────────────────────────────────────────────
+
+function SevBadge({ sev }) {
+  const c = s(sev);
   return (
-    <div className="rounded-xl border border-slate-700/40 bg-slate-800/30 p-4">
-      <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">{label}</p>
-      <p className={`text-2xl font-black font-mono ${color}`}>{value}</p>
-    </div>
+    <span style={{
+      display:       "inline-flex",
+      alignItems:    "center",
+      gap:           "5px",
+      padding:       "3px 10px",
+      borderRadius:  "20px",
+      border:        `1px solid ${c.border}`,
+      background:    c.bg,
+      color:         c.color,
+      fontSize:      "10px",
+      fontWeight:    700,
+      letterSpacing: "0.08em",
+      fontFamily:    "var(--font-mono, monospace)",
+      whiteSpace:    "nowrap",
+    }}>
+      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: c.dot, flexShrink: 0 }} />
+      {sev}
+    </span>
   );
 }
 
-function RepoInfoCard({ info }) {
+function StatCard({ label, value, sev }) {
+  const c = sev ? s(sev) : null;
   return (
-    <div className="rounded-xl border border-slate-700/40 bg-slate-800/20 p-4 mb-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <a
-            href={`https://github.com/${info.full_name}`}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono font-bold text-blue-400 hover:text-blue-300 text-sm underline underline-offset-2"
-          >
-            {info.full_name}
-          </a>
-          {info.description && (
-            <p className="text-xs text-slate-400 mt-1">{info.description}</p>
-          )}
-        </div>
-        <div className="flex gap-4 text-xs text-slate-500">
-          <span>⭐ {info.stars}</span>
-          <span>🍴 {info.forks}</span>
-          <span>📦 {info.language ?? "Unknown"}</span>
-          <span>🗓 {info.updated_at}</span>
-        </div>
+    <div style={{
+      padding:      "24px 20px",
+      background:   "rgba(255,255,255,0.02)",
+      border:       "1px solid rgba(255,255,255,0.07)",
+      borderRadius: "14px",
+      textAlign:    "center",
+    }}>
+      <div style={{
+        fontSize:   "36px",
+        fontWeight: 900,
+        fontFamily: "var(--font-mono, monospace)",
+        color:      c ? c.color : "white",
+        lineHeight: 1.1,
+        textShadow: c ? `0 0 20px ${c.color}66` : "none",
+        marginBottom: "8px",
+      }}>
+        {value}
+      </div>
+      <div style={{
+        fontSize:      "10px",
+        color:         "rgba(255,255,255,0.3)",
+        letterSpacing: "0.18em",
+        fontFamily:    "var(--font-mono, monospace)",
+        textTransform: "uppercase",
+      }}>
+        {label}
       </div>
     </div>
   );
 }
 
+function SectionTitle({ dot, title, count }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+      <div style={{ width: "4px", height: "20px", borderRadius: "2px", background: dot, flexShrink: 0 }} />
+      <h3 style={{
+        fontSize:      "11px",
+        fontWeight:    700,
+        color:         "rgba(255,255,255,0.7)",
+        letterSpacing: "0.2em",
+        textTransform: "uppercase",
+        fontFamily:    "var(--font-mono, monospace)",
+        margin:        0,
+      }}>
+        {title}
+      </h3>
+      {count !== undefined && (
+        <span style={{
+          padding:      "2px 10px",
+          background:   "rgba(255,255,255,0.06)",
+          border:       "1px solid rgba(255,255,255,0.1)",
+          borderRadius: "20px",
+          fontSize:     "11px",
+          color:        "rgba(255,255,255,0.4)",
+          fontFamily:   "var(--font-mono, monospace)",
+        }}>
+          {count}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: "1px", background: "rgba(255,255,255,0.05)", margin: "32px 0" }} />;
+}
+
+// ── Secret expand card ────────────────────────────────────────────────────────
 function SecretCard({ secret, index }) {
-  const [expanded, setExpanded] = useState(false);
-  const s = SEVERITY_STYLES[secret.severity] ?? SEVERITY_STYLES.Info;
+  const [open, setOpen] = useState(false);
+  const c = s(secret.severity);
 
   return (
-    <div
-      className={`border-b border-slate-700/30 last:border-0
-        ${secret.severity === "Critical" ? "border-l-2 border-l-red-500" :
-          secret.severity === "High"     ? "border-l-2 border-l-orange-500" :
-          "border-l-2 border-l-amber-500"}
-      `}
-    >
+    <div style={{
+      borderRadius: "12px",
+      border:       `1px solid ${open ? c.border : "rgba(255,255,255,0.06)"}`,
+      background:   open ? c.bg : "rgba(255,255,255,0.02)",
+      overflow:     "hidden",
+      transition:   "all 0.2s ease",
+      marginBottom: "10px",
+    }}>
+      {/* Row */}
       <div
-        className="grid grid-cols-[auto_2fr_1.5fr_1fr_auto] gap-0 px-4 py-3
-          cursor-pointer hover:bg-slate-700/20 transition-colors items-center"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => setOpen(!open)}
+        style={{
+          display:    "flex",
+          alignItems: "center",
+          gap:        "16px",
+          padding:    "16px 20px",
+          cursor:     "pointer",
+        }}
       >
-        {/* Index */}
-        <div className="pr-3 text-slate-600 font-mono text-xs w-8">
+        {/* Number */}
+        <span style={{
+          color:       "rgba(255,255,255,0.15)",
+          fontFamily:  "var(--font-mono, monospace)",
+          fontSize:    "11px",
+          fontWeight:  700,
+          minWidth:    "28px",
+          flexShrink:  0,
+        }}>
           {String(index + 1).padStart(2, "0")}
-        </div>
+        </span>
+
+        {/* Dot */}
+        <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: c.dot, flexShrink: 0, boxShadow: `0 0 8px ${c.dot}` }} />
 
         {/* Type */}
-        <div className="font-mono text-xs text-slate-200 font-semibold truncate pr-3">
+        <span style={{
+          flex:        1,
+          fontFamily:  "var(--font-mono, monospace)",
+          fontSize:    "13px",
+          fontWeight:  600,
+          color:       "white",
+          minWidth:    0,
+        }}>
           {secret.type}
-        </div>
+        </span>
 
         {/* File */}
-        <div className="font-mono text-[11px] text-blue-400 truncate pr-3">
+        <span style={{
+          fontFamily:  "var(--font-mono, monospace)",
+          fontSize:    "11px",
+          color:       "rgba(96,165,250,0.8)",
+          maxWidth:    "220px",
+          overflow:    "hidden",
+          textOverflow:"ellipsis",
+          whiteSpace:  "nowrap",
+          flexShrink:  0,
+        }}>
           {secret.file}
-          {secret.line_number && (
-            <span className="text-slate-600">:{secret.line_number}</span>
-          )}
-        </div>
+          {secret.line_number ? <span style={{ color: "rgba(255,255,255,0.2)" }}>:{secret.line_number}</span> : ""}
+        </span>
 
         {/* Severity */}
-        <div>
-          <SeverityBadge level={secret.severity} />
+        <div style={{ flexShrink: 0 }}>
+          <SevBadge sev={secret.severity} />
         </div>
 
         {/* Arrow */}
-        <div className="pl-3">
-          <span className={`text-slate-500 text-xs transition-transform inline-block ${expanded ? "rotate-180" : ""}`}>
-            ▾
-          </span>
-        </div>
+        <span style={{
+          color:      "rgba(255,255,255,0.2)",
+          fontSize:   "12px",
+          flexShrink: 0,
+          transition: "transform 0.2s",
+          transform:  open ? "rotate(180deg)" : "rotate(0deg)",
+        }}>▾</span>
       </div>
 
-      {expanded && (
-        <div className="px-5 pb-4 pt-1 bg-slate-900/50 border-t border-slate-700/30">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
-            <div>
-              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Secret Type</p>
-              <p className="text-xs text-slate-200">{secret.type}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">File</p>
-              <p className="font-mono text-xs text-blue-400">
-                {secret.file}
-                {secret.line_number ? ` (line ${secret.line_number})` : ""}
-              </p>
-            </div>
-          </div>
-
-          {/* Masked snippet */}
-          <div className="mb-3">
-            <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1.5">
+      {/* Expanded */}
+      {open && (
+        <div style={{
+          padding:    "0 20px 20px",
+          borderTop:  "1px solid rgba(255,255,255,0.05)",
+          paddingTop: "20px",
+          display:    "flex",
+          flexDirection: "column",
+          gap:        "16px",
+        }}>
+          {/* Masked value */}
+          <div>
+            <div style={{ color: "rgba(255,255,255,0.3)", fontSize: "9px", letterSpacing: "0.2em", fontFamily: "monospace", marginBottom: "8px", textTransform: "uppercase" }}>
               Masked Value
-            </p>
-            <div className="bg-slate-900 rounded-lg px-3 py-2 border border-slate-700/50">
-              <code className="text-xs text-green-400 font-mono break-all">
+            </div>
+            <div style={{ background: "rgba(0,0,0,0.4)", borderRadius: "8px", padding: "14px 16px", border: "1px solid rgba(255,255,255,0.05)" }}>
+              <code style={{ color: "#00ff41", fontFamily: "monospace", fontSize: "12px", wordBreak: "break-all", lineHeight: 1.6 }}>
                 {secret.snippet}
               </code>
             </div>
@@ -121,24 +215,24 @@ function SecretCard({ secret, index }) {
 
           {/* Line context */}
           {secret.line_content && (
-            <div className="mb-3">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1.5">
-                Line Context (masked)
-              </p>
-              <div className="bg-slate-900 rounded-lg px-3 py-2 border border-slate-700/50">
-                <code className="text-xs text-amber-300 font-mono break-all">
+            <div>
+              <div style={{ color: "rgba(255,255,255,0.3)", fontSize: "9px", letterSpacing: "0.2em", fontFamily: "monospace", marginBottom: "8px", textTransform: "uppercase" }}>
+                Line Context
+              </div>
+              <div style={{ background: "rgba(0,0,0,0.4)", borderRadius: "8px", padding: "14px 16px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                <code style={{ color: "#ffaa00", fontFamily: "monospace", fontSize: "12px", wordBreak: "break-all", lineHeight: 1.6 }}>
                   {secret.line_content}
                 </code>
               </div>
             </div>
           )}
 
-          {/* Recommendation */}
-          <div className="bg-emerald-950/30 border border-emerald-900/40 rounded-lg px-3 py-2">
-            <p className="text-[10px] uppercase tracking-widest text-emerald-400 font-semibold mb-1">
-              Immediate Action Required
-            </p>
-            <p className="text-xs text-slate-300">
+          {/* Action */}
+          <div style={{ background: "rgba(0,180,80,0.06)", border: "1px solid rgba(0,180,80,0.15)", borderRadius: "8px", padding: "14px 16px" }}>
+            <div style={{ color: "#00cc66", fontSize: "9px", letterSpacing: "0.2em", fontFamily: "monospace", marginBottom: "6px", textTransform: "uppercase", fontWeight: 700 }}>
+              Immediate Action
+            </div>
+            <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "12px", lineHeight: 1.6, margin: 0 }}>
               {_secretRecommendation(secret.type)}
             </p>
           </div>
@@ -148,61 +242,79 @@ function SecretCard({ secret, index }) {
   );
 }
 
+// ── Sensitive files ───────────────────────────────────────────────────────────
 function SensitiveFilesSection({ files }) {
   if (!files?.length) return null;
   return (
-    <div className="mb-6">
-      <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-        <span className="w-1 h-4 rounded-full bg-amber-500 inline-block" />
-        Sensitive Files Detected in Repository ({files.length})
-      </h3>
-      <div className="rounded-xl border border-slate-700/50 bg-slate-800/20 overflow-hidden divide-y divide-slate-700/30">
-        {files.map((f, i) => (
-          <div key={i} className="flex items-center gap-4 px-4 py-3 hover:bg-slate-700/20 transition-colors">
-            <span className={`text-xs font-bold ${SEVERITY_STYLES[f.severity]?.text ?? "text-slate-400"}`}>
-              {f.severity}
-            </span>
-            <a
-              href={f.github_url}
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono text-xs text-blue-400 hover:text-blue-300 underline underline-offset-2 flex-1"
-            >
-              {f.file}
-            </a>
-            <span className="text-xs text-slate-500 hidden sm:block">{f.description}</span>
-          </div>
-        ))}
+    <div>
+      <SectionTitle dot="#ffaa00" title="Sensitive Files in Repository" count={files.length} />
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        {files.map((f, i) => {
+          const c = s(f.severity);
+          return (
+            <div key={i} style={{
+              display:      "flex",
+              alignItems:   "center",
+              gap:          "16px",
+              padding:      "14px 20px",
+              background:   c.bg,
+              border:       `1px solid ${c.border}`,
+              borderRadius: "10px",
+            }}>
+              <SevBadge sev={f.severity} />
+              <a href={f.github_url} target="_blank" rel="noreferrer" style={{
+                flex:          1,
+                fontFamily:    "monospace",
+                fontSize:      "12px",
+                color:         "#60a5fa",
+                textDecoration:"none",
+                wordBreak:     "break-all",
+              }}>
+                {f.file}
+              </a>
+              <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "11px", flexShrink: 0 }}>
+                {f.description}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
+// ── Suspicious commits ────────────────────────────────────────────────────────
 function SuspiciousCommitsSection({ commits }) {
   if (!commits?.length) return null;
   return (
-    <div className="mb-6">
-      <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-        <span className="w-1 h-4 rounded-full bg-purple-500 inline-block" />
-        Suspicious Commit History ({commits.length})
-      </h3>
-      <div className="rounded-xl border border-purple-900/40 bg-purple-950/20 overflow-hidden divide-y divide-purple-900/30">
+    <div>
+      <SectionTitle dot="#a855f7" title="Suspicious Commit History" count={commits.length} />
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {commits.map((c, i) => (
-          <div key={i} className="px-4 py-3">
-            <div className="flex items-center gap-3 mb-1">
-              <span className="font-mono text-[10px] text-purple-400 bg-purple-900/40 px-2 py-0.5 rounded">
+          <div key={i} style={{
+            padding:      "18px 20px",
+            background:   "rgba(168,85,247,0.05)",
+            border:       "1px solid rgba(168,85,247,0.15)",
+            borderRadius: "12px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
+              <span style={{
+                padding:      "3px 10px",
+                background:   "rgba(168,85,247,0.15)",
+                border:       "1px solid rgba(168,85,247,0.25)",
+                borderRadius: "6px",
+                color:        "#c084fc",
+                fontFamily:   "monospace",
+                fontSize:     "11px",
+                fontWeight:   700,
+              }}>
                 {c.sha}
               </span>
-              <span className="text-[10px] text-slate-500">{c.date}</span>
+              <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "11px" }}>{c.date}</span>
             </div>
-            <p className="text-xs text-slate-300 mb-1">{c.message}</p>
-            <p className="text-[10px] text-amber-400">{c.note}</p>
-            <a
-              href={c.url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[10px] text-blue-400 hover:text-blue-300 underline underline-offset-2"
-            >
+            <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "13px", marginBottom: "8px", lineHeight: 1.5 }}>{c.message}</p>
+            <p style={{ color: "#ffaa00", fontSize: "11px", marginBottom: "10px" }}>{c.note}</p>
+            <a href={c.url} target="_blank" rel="noreferrer" style={{ color: "#60a5fa", fontSize: "11px", textDecoration: "none" }}>
               View commit ↗
             </a>
           </div>
@@ -212,26 +324,30 @@ function SuspiciousCommitsSection({ commits }) {
   );
 }
 
-function FilesScannedSection({ files }) {
+// ── Files with secrets chips ──────────────────────────────────────────────────
+function FilesWithSecrets({ files }) {
   if (!files?.length) return null;
   return (
-    <div className="mb-6">
-      <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-        <span className="w-1 h-4 rounded-full bg-red-500 inline-block" />
-        Files Containing Secrets ({files.length})
-      </h3>
-      <div className="flex flex-wrap gap-2">
+    <div>
+      <SectionTitle dot="#ff0040" title="Files Containing Secrets" count={files.length} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
         {files.map((f, i) => (
-          <a
-            key={i}
-            href={f.github_url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 px-3 py-1.5 bg-red-950/30 border border-red-800/40 rounded-lg
-              text-xs font-mono text-red-300 hover:text-red-200 hover:bg-red-950/50 transition-colors"
+          <a key={i} href={f.github_url} target="_blank" rel="noreferrer" style={{
+            display:        "flex",
+            alignItems:     "center",
+            gap:            "10px",
+            padding:        "10px 16px",
+            background:     "rgba(255,0,64,0.06)",
+            border:         "1px solid rgba(255,0,64,0.2)",
+            borderRadius:   "10px",
+            textDecoration: "none",
+            transition:     "all 0.15s",
+          }}
+          onMouseEnter={e=>e.currentTarget.style.background="rgba(255,0,64,0.12)"}
+          onMouseLeave={e=>e.currentTarget.style.background="rgba(255,0,64,0.06)"}
           >
-            {f.path}
-            <span className="bg-red-800/50 px-1.5 py-0.5 rounded text-[10px]">
+            <span style={{ color: "#ff6680", fontFamily: "monospace", fontSize: "12px" }}>{f.path}</span>
+            <span style={{ padding: "2px 8px", background: "rgba(255,0,64,0.2)", borderRadius: "6px", color: "#ff0040", fontSize: "10px", fontWeight: 700, whiteSpace: "nowrap" }}>
               {f.secrets_found} secret{f.secrets_found !== 1 ? "s" : ""}
             </span>
           </a>
@@ -242,45 +358,35 @@ function FilesScannedSection({ files }) {
 }
 
 // ── Loading skeleton ──────────────────────────────────────────────────────────
-
 function LoadingSkeleton() {
   return (
-    <section className="mb-10 animate-pulse">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-1 h-6 rounded-full bg-slate-700" />
-        <div className="h-4 w-56 bg-slate-700 rounded" />
+    <div style={{ padding: "40px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
+        <div style={{ width: "4px", height: "24px", borderRadius: "2px", background: "rgba(255,255,255,0.08)" }} />
+        <div style={{ height: "14px", width: "200px", background: "rgba(255,255,255,0.06)", borderRadius: "6px" }} />
       </div>
-      <div className="grid grid-cols-4 gap-3 mb-6">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-20 bg-slate-800/50 rounded-xl border border-slate-700/40" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "16px", marginBottom: "32px" }}>
+        {[...Array(5)].map((_, i) => (
+          <div key={i} style={{ height: "90px", background: "rgba(255,255,255,0.03)", borderRadius: "14px", border: "1px solid rgba(255,255,255,0.05)" }} />
         ))}
       </div>
-      <div className="rounded-xl border border-slate-700/40 h-48 bg-slate-800/20" />
-    </section>
+      <div style={{ height: "200px", background: "rgba(255,255,255,0.02)", borderRadius: "14px", border: "1px solid rgba(255,255,255,0.05)" }} />
+    </div>
   );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-
 export default function GitHubScanner({ data, loading }) {
-  const [secretFilter, setSecretFilter] = useState("All");
+  const [sevFilter, setSevFilter] = useState("All");
 
   if (loading) return <LoadingSkeleton />;
   if (!data)   return null;
 
   if (data.error) {
     return (
-      <section className="mb-10">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-1 h-6 rounded-full bg-purple-500" />
-          <h2 className="text-sm font-bold text-slate-200 uppercase tracking-widest">
-            GitHub Repository Scanner
-          </h2>
-        </div>
-        <div className="bg-red-950/30 border border-red-800/40 rounded-xl px-5 py-4 text-sm text-red-300">
-          {data.error}
-        </div>
-      </section>
+      <div style={{ padding: "24px", background: "rgba(255,0,64,0.06)", border: "1px solid rgba(255,0,64,0.2)", borderRadius: "14px", color: "#ff6680", fontFamily: "monospace", fontSize: "13px" }}>
+        ✕ {data.error}
+      </div>
     );
   }
 
@@ -291,125 +397,204 @@ export default function GitHubScanner({ data, loading }) {
     total_files_in_repo, total_files_scanned, rate_limit_note,
   } = data;
 
-  const s = SEVERITY_STYLES[overall_severity] ?? SEVERITY_STYLES.None;
-
-  // Filter secrets
-  const visibleSecrets = secretFilter === "All"
-    ? secrets
-    : secrets.filter(s => s.severity === secretFilter);
+  const ov = s(overall_severity);
+  const visibleSecrets = sevFilter === "All" ? secrets : secrets.filter(sec => sec.severity === sevFilter);
 
   return (
-    <section className="mb-10">
-      {/* ── Header ── */}
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-1 h-6 rounded-full bg-purple-500" />
-        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-widest">
+    <section style={{ paddingBottom: "48px" }}>
+
+      {/* ── Section header ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "32px" }}>
+        <div style={{ width: "4px", height: "28px", borderRadius: "2px", background: "#a855f7", boxShadow: "0 0 10px rgba(168,85,247,0.5)", flexShrink: 0 }} />
+        <h2 style={{
+          fontFamily:    "var(--font-mono, monospace)",
+          fontSize:      "13px",
+          fontWeight:    700,
+          color:         "rgba(255,255,255,0.8)",
+          letterSpacing: "0.2em",
+          textTransform: "uppercase",
+          margin:        0,
+        }}>
           GitHub Repository Scanner
         </h2>
-        <a
-          href={repo_url}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-auto text-xs text-blue-400 hover:text-blue-300 underline underline-offset-2 font-mono"
-        >
-          {repo_url.replace("https://github.com/", "")} ↗
-        </a>
+        {repo_url && (
+          <a href={repo_url} target="_blank" rel="noreferrer" style={{
+            marginLeft:     "auto",
+            color:          "#60a5fa",
+            fontSize:       "12px",
+            fontFamily:     "monospace",
+            textDecoration: "none",
+            opacity:        0.7,
+          }}>
+            {repo_url.replace("https://github.com/", "")} ↗
+          </a>
+        )}
       </div>
 
-      {/* ── Repo info ── */}
-      <RepoInfoCard info={repo_info} />
+      {/* ── Repo info card ── */}
+      {repo_info && (
+        <div style={{
+          padding:      "24px 28px",
+          background:   "rgba(255,255,255,0.02)",
+          border:       "1px solid rgba(255,255,255,0.07)",
+          borderRadius: "16px",
+          marginBottom: "28px",
+          display:      "flex",
+          alignItems:   "flex-start",
+          justifyContent:"space-between",
+          gap:          "24px",
+          flexWrap:     "wrap",
+        }}>
+          <div>
+            <a href={`https://github.com/${repo_info.full_name}`} target="_blank" rel="noreferrer" style={{
+              fontFamily:    "monospace",
+              fontSize:      "16px",
+              fontWeight:    700,
+              color:         "#60a5fa",
+              textDecoration:"none",
+              display:       "block",
+              marginBottom:  "8px",
+            }}>
+              {repo_info.full_name}
+            </a>
+            {repo_info.description && (
+              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "13px", margin: 0, lineHeight: 1.5 }}>
+                {repo_info.description}
+              </p>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "24px", flexShrink: 0 }}>
+            {[
+              { label: "Stars",    value: repo_info.stars,    icon: "⭐" },
+              { label: "Forks",    value: repo_info.forks,    icon: "🍴" },
+              { label: "Language", value: repo_info.language || "Unknown", icon: "📦" },
+              { label: "Updated",  value: repo_info.updated_at, icon: "🗓" },
+            ].map(m => (
+              <div key={m.label} style={{ textAlign: "center" }}>
+                <div style={{ fontSize: "18px", marginBottom: "4px" }}>{m.icon}</div>
+                <div style={{ color: "white", fontSize: "13px", fontWeight: 600, marginBottom: "2px" }}>{m.value}</div>
+                <div style={{ color: "rgba(255,255,255,0.25)", fontSize: "9px", letterSpacing: "0.15em", textTransform: "uppercase" }}>{m.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Rate limit warning ── */}
       {rate_limit_note && (
-        <div className="mb-5 bg-amber-950/30 border border-amber-800/40 rounded-xl px-4 py-3 text-xs text-amber-300">
+        <div style={{
+          padding:      "14px 20px",
+          background:   "rgba(255,170,0,0.06)",
+          border:       "1px solid rgba(255,170,0,0.2)",
+          borderRadius: "10px",
+          color:        "#ffaa00",
+          fontSize:     "12px",
+          fontFamily:   "monospace",
+          marginBottom: "28px",
+        }}>
           ⚠ {rate_limit_note}
         </div>
       )}
 
-      {/* ── Summary stats ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
-        <StatCard
-          label="Overall Risk"
-          value={overall_severity}
-          color={s.text}
-        />
-        <StatCard
-          label="Secrets Found"
-          value={secrets.length}
-          color={secrets.length > 0 ? "text-red-400" : "text-emerald-400"}
-        />
-        <StatCard label="Critical" value={severity_counts.Critical ?? 0} color="text-red-400" />
-        <StatCard label="High"     value={severity_counts.High ?? 0}     color="text-orange-400" />
-        <StatCard
-          label="Files Scanned"
-          value={`${total_files_scanned}/${total_files_in_repo}`}
-          color="text-slate-400"
-        />
+      {/* ── Stat cards ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "16px", marginBottom: "40px" }}>
+        <StatCard label="Overall Risk"   value={overall_severity}          sev={overall_severity} />
+        <StatCard label="Secrets Found"  value={secrets.length}            sev={secrets.length > 0 ? "Critical" : "None"} />
+        <StatCard label="Critical"       value={severity_counts.Critical ?? 0} sev="Critical" />
+        <StatCard label="High"           value={severity_counts.High ?? 0}     sev="High" />
+        <StatCard label="Files Scanned"  value={`${total_files_scanned}/${total_files_in_repo}`} />
       </div>
 
-      {/* ── Clean result ── */}
+      {/* ── Clean state ── */}
       {secrets.length === 0 && sensitive_files.length === 0 && suspicious_commits.length === 0 ? (
-        <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/20 px-5 py-10 text-center">
-          <p className="text-emerald-400 font-bold text-sm mb-1">✓ No secrets detected</p>
-          <p className="text-slate-500 text-xs">
-            Scanned {total_files_scanned} files — no secret patterns found.
+        <div style={{
+          padding:      "60px 40px",
+          background:   "rgba(0,180,80,0.04)",
+          border:       "1px solid rgba(0,180,80,0.15)",
+          borderRadius: "16px",
+          textAlign:    "center",
+        }}>
+          <div style={{ fontSize: "40px", marginBottom: "16px" }}>✓</div>
+          <p style={{ color: "#00cc66", fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>
+            No secrets detected
+          </p>
+          <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "13px" }}>
+            Scanned {total_files_scanned} files — no secret patterns found
           </p>
         </div>
       ) : (
-        <>
-          {/* Files with secrets */}
-          <FilesScannedSection files={files_with_secrets} />
+        <div style={{ display: "flex", flexDirection: "column", gap: "40px" }}>
 
-          {/* Sensitive files present */}
-          <SensitiveFilesSection files={sensitive_files} />
+          {/* Files with secrets */}
+          {files_with_secrets.length > 0 && <FilesWithSecrets files={files_with_secrets} />}
+
+          {/* Sensitive files */}
+          {sensitive_files.length > 0 && (
+            <>
+              <Divider />
+              <SensitiveFilesSection files={sensitive_files} />
+            </>
+          )}
 
           {/* Suspicious commits */}
-          <SuspiciousCommitsSection commits={suspicious_commits} />
+          {suspicious_commits.length > 0 && (
+            <>
+              <Divider />
+              <SuspiciousCommitsSection commits={suspicious_commits} />
+            </>
+          )}
 
           {/* Secrets detail */}
           {secrets.length > 0 && (
-            <div>
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <span className="w-1 h-4 rounded-full bg-red-500 inline-block" />
-                Secret Details ({secrets.length})
-              </h3>
+            <>
+              <Divider />
+              <div>
+                <SectionTitle dot="#ff0040" title="Secret Details" count={secrets.length} />
 
-              {/* Severity filter */}
-              <div className="flex gap-2 mb-4 flex-wrap">
-                {["All", "Critical", "High", "Medium"].map(sev => (
-                  <button
-                    key={sev}
-                    onClick={() => setSecretFilter(sev)}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-all ${
-                      secretFilter === sev
-                        ? "bg-slate-600 border-slate-500 text-white"
-                        : "bg-transparent border-slate-700/40 text-slate-500 hover:text-slate-300"
-                    }`}
-                  >
-                    {sev}
-                    {sev !== "All" && (
-                      <span className="ml-1 opacity-60">
-                        ({secrets.filter(s => s.severity === sev).length})
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              <div className="rounded-xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
-                {/* Table header */}
-                <div className="grid grid-cols-[auto_2fr_1.5fr_1fr_auto] gap-0 bg-slate-800/70 border-b border-slate-700/50 px-4 py-3">
-                  {["#", "Secret Type", "File:Line", "Severity", ""].map((h, i) => (
-                    <div key={i} className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                      {h}
-                    </div>
-                  ))}
+                {/* Severity filter pills */}
+                <div style={{ display: "flex", gap: "8px", marginBottom: "24px", flexWrap: "wrap" }}>
+                  {["All", "Critical", "High", "Medium", "Low"].map(f => {
+                    const count = f === "All" ? secrets.length : secrets.filter(s => s.severity === f).length;
+                    const isActive = sevFilter === f;
+                    const c = f !== "All" ? s(f) : null;
+                    return (
+                      <button key={f} onClick={() => setSevFilter(f)} style={{
+                        padding:      "8px 18px",
+                        background:   isActive ? (c ? c.bg : "rgba(255,255,255,0.08)") : "rgba(255,255,255,0.02)",
+                        border:       `1px solid ${isActive ? (c ? c.border : "rgba(255,255,255,0.2)") : "rgba(255,255,255,0.07)"}`,
+                        borderRadius: "20px",
+                        color:        isActive ? (c ? c.color : "white") : "rgba(255,255,255,0.35)",
+                        fontFamily:   "monospace",
+                        fontSize:     "11px",
+                        fontWeight:   isActive ? 700 : 400,
+                        cursor:       "pointer",
+                        transition:   "all 0.15s",
+                        display:      "flex",
+                        alignItems:   "center",
+                        gap:          "8px",
+                      }}>
+                        {f}
+                        {count > 0 && (
+                          <span style={{
+                            padding:      "1px 7px",
+                            background:   isActive ? (c ? `${c.color}25` : "rgba(255,255,255,0.1)") : "rgba(255,255,255,0.06)",
+                            borderRadius: "10px",
+                            fontSize:     "10px",
+                            fontWeight:   700,
+                          }}>
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                <div className="divide-y divide-slate-700/30">
+                {/* Secret cards */}
+                <div>
                   {visibleSecrets.length === 0 ? (
-                    <div className="px-5 py-8 text-center text-sm text-slate-500">
-                      No {secretFilter} severity secrets.
+                    <div style={{ padding: "40px", textAlign: "center", color: "rgba(255,255,255,0.2)", fontFamily: "monospace", fontSize: "12px" }}>
+                      No {sevFilter} severity secrets
                     </div>
                   ) : (
                     visibleSecrets.map((secret, i) => (
@@ -418,28 +603,26 @@ export default function GitHubScanner({ data, loading }) {
                   )}
                 </div>
               </div>
-            </div>
+            </>
           )}
-        </>
+        </div>
       )}
     </section>
   );
 }
 
 // ── Recommendation map ────────────────────────────────────────────────────────
-
 function _secretRecommendation(type) {
   const map = {
-    "AWS Access Key":        "Immediately revoke this key in AWS IAM Console. Rotate all associated permissions. Check CloudTrail for unauthorized usage.",
-    "AWS Secret Key":        "Revoke in AWS IAM. Audit CloudTrail logs for any API calls made with this key.",
-    "GitHub Token":          "Revoke at github.com/settings/tokens immediately. Audit repository access logs.",
-    "Google API Key":        "Revoke at console.cloud.google.com/apis/credentials. Check usage logs for abuse.",
-    "Stripe Secret Key":     "Revoke at dashboard.stripe.com/apikeys. Check for unauthorized charges immediately.",
-    "OpenAI API Key":        "Revoke at platform.openai.com/api-keys. Check usage for unexpected charges.",
-    "Private RSA Key":       "This key is permanently compromised. Generate a new key pair immediately.",
-    "Database URL":          "Rotate database password immediately. Check for unauthorized queries in DB logs.",
-    "Generic Password":      "Change this password immediately across all systems where it may be reused.",
-    "JWT Token":             "If this is a signing secret, rotate it. All issued tokens are compromised.",
+    "AWS Access Key":    "Revoke immediately in AWS IAM Console. Audit CloudTrail for unauthorized usage.",
+    "GitHub Token":      "Revoke at github.com/settings/tokens. Audit repository access logs.",
+    "Google API Key":    "Revoke at console.cloud.google.com/apis/credentials. Check usage logs.",
+    "Stripe Secret Key": "Revoke at dashboard.stripe.com/apikeys. Check for unauthorized charges.",
+    "OpenAI API Key":    "Revoke at platform.openai.com/api-keys. Check usage for unexpected charges.",
+    "Private RSA Key":   "Key is permanently compromised. Generate a new key pair immediately.",
+    "Database URL":      "Rotate database password immediately. Check for unauthorized queries.",
+    "Generic Password":  "Change this password immediately across all systems where it may be reused.",
+    "JWT Token":         "Rotate the signing secret. All issued tokens are compromised.",
   };
   return map[type] ?? "Revoke or rotate this credential immediately. Remove from repository and add to .gitignore.";
 }
